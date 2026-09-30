@@ -1,0 +1,38 @@
+services:
+  chain:
+    build: ./chain
+    command: ["/node", "--validator-key", "/keys/validator.key"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./chain/keys:/keys:ro
+
+  seed:
+    build: ./chain
+    command: ["/seed", "--node", "http://chain:8080", "--admin-key", "/keys/admin.key", "--meta-dir", "/meta"]
+    volumes:
+      - ./chain/keys:/keys:ro
+      - ./meta:/meta:ro       # hashes the off-chain documents it registers
+    depends_on:
+      - chain
+    restart: "no"             # runs once, then exits
+
+  web:
+    image: node:20-alpine
+    working_dir: /app
+    command: npx --yes http-server /app -p 3000 --cors -c-1
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./web:/app
+    depends_on:
+      - chain
+
+  meta:
+    image: node:20-alpine
+    working_dir: /app
+    command: npx --yes http-server /app -p 3001 --cors -c-1   # -c-1: no caching, so edits show at once
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./meta:/app

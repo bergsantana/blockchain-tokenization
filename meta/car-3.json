@@ -1,0 +1,12 @@
+{
+  "type": "car",
+  "vin": "93YRBB005RJ712390",
+  "plate": "RTM-7H63",
+  "make": "Renault",
+  "model": "Kwid",
+  "year": 2023,
+  "color": "silver",
+  "registration": "CRLV 2026, valid until 2027-05-31",
+  "insurance": { "policy": "AUTO-2026-120051", "validUntil": "2027-02-28" },
+  "photos": ["car-3-front.jpg", "car-3-rear.jpg"]
+}

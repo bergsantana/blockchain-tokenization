@@ -1,0 +1,12 @@
+{
+  "type": "car",
+  "vin": "9BWZZZ377VT004251",
+  "plate": "QXB-4E21",
+  "make": "Volkswagen",
+  "model": "Polo Track",
+  "year": 2024,
+  "color": "white",
+  "registration": "CRLV 2026, valid until 2027-03-31",
+  "insurance": { "policy": "AUTO-2026-118734", "validUntil": "2027-01-15" },
+  "photos": ["car-1-front.jpg", "car-1-rear.jpg", "car-1-left.jpg", "car-1-right.jpg"]
+}
