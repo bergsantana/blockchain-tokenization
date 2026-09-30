@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aluguel de Carros</title>
+<link rel="icon" href="data:,">
+<script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js"></script>
+<style>
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --panel-2: #f8f9fb; --text: #1c2026; --muted: #5f6875; --border: #dde1e7;
+  --accent: #2459c9; --accent-hover: #1c4aac; --accent-text: #ffffff;
+  --ok: #17794a; --ok-bg: #e1f2e9; --bad: #b3261e; --bad-bg: #fbe7e5; --warn: #8a5a00; --warn-bg: #fcefd7;
+  --idle: #5d6673; --idle-bg: #eceef2; --role: #3b3fb8; --role-bg: #e9eafc;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111418; --panel: #1a1e24; --panel-2: #21262d; --text: #e6e9ee; --muted: #9aa3af; --border: #30363f;
+    --accent: #6d9cff; --accent-hover: #8cb1ff; --accent-text: #0c1016;
+    --ok: #62d49c; --ok-bg: #163527; --bad: #ff8b82; --bad-bg: #3f1d1a; --warn: #f0c36c; --warn-bg: #3a2e17;
+    --idle: #a3acb8; --idle-bg: #2a3038; --role: #b3b6ff; --role-bg: #2a2c52;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+code, .mono { font-family: var(--mono); font-size: 12px; }
+header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--border); }
+.bar { max-width: 1180px; margin: 0 auto; padding: 10px 16px 0; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+.brand { font-weight: 650; font-size: 16px; margin-right: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.node { font-weight: 400; font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
+.dot.on { background: var(--ok); } .dot.off { background: var(--bad); }
+.account { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 13px; }
+.account select { font-weight: 600; }
+.addr { cursor: copy; color: var(--muted); }
+nav { max-width: 1180px; margin: 0 auto; padding: 4px 16px 0; display: flex; gap: 2px; overflow-x: auto; }
+nav button { border: 0; background: none; padding: 9px 14px; color: var(--muted); font: inherit; font-weight: 600; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+nav button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 96px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 16px; align-items: start; margin-bottom: 16px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; min-width: 0; margin-bottom: 16px; }
+.grid > .card { margin-bottom: 0; }
+.card h2 { font-size: 15px; margin: 0 0 2px; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+.sub { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+.field { display: block; margin: 0 0 10px; font-size: 12px; color: var(--muted); font-weight: 600; min-width: 0; }
+.field > input, .field > select, .field > textarea { display: block; width: 100%; margin-top: 4px; }
+fieldset.field { border: 0; padding: 0; }
+fieldset.field legend { padding: 0; margin-bottom: 4px; }
+input, select, textarea { font: inherit; font-weight: 400; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; min-width: 0; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+textarea { font-family: var(--mono); font-size: 12px; min-height: 132px; resize: vertical; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+button { font: inherit; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-text); border: 0; border-radius: 6px; padding: 8px 16px; font-weight: 600; }
+button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+button.ghost { background: none; border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 10px; font-size: 12px; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.gate { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.gate-note { font-size: 12px; color: var(--warn); }
+.hash { font-family: var(--mono); font-size: 11px; color: var(--muted); word-break: break-all; margin: -4px 0 10px; }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 650; letter-spacing: .02em; background: var(--idle-bg); color: var(--idle); white-space: nowrap; }
+.chip.ok { background: var(--ok-bg); color: var(--ok); }
+.chip.bad { background: var(--bad-bg); color: var(--bad); }
+.chip.warn { background: var(--warn-bg); color: var(--warn); }
+.chip.role { background: var(--role-bg); color: var(--role); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 650; white-space: nowrap; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.empty { color: var(--muted); font-size: 13px; font-weight: 400; padding: 8px 0; }
+.summary { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-size: 13px; margin: 0 0 12px; }
+.summary > div { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.summary > div > span:last-child { font-variant-numeric: tabular-nums; text-align: right; }
+.summary .total { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 6px; font-weight: 600; }
+.summary .note { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; }
+.warn-text { color: var(--warn); } .bad-text { color: var(--bad); } .ok-text { color: var(--ok); }
+.checks label { display: flex; gap: 8px; align-items: center; font-weight: 400; color: var(--text); font-size: 13px; padding: 3px 0; }
+.result { font-size: 13px; margin-top: 12px; }
+.result:empty { display: none; }
+.result a { color: var(--accent); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 14px; color: var(--muted); font-size: 13px; }
+.block { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+.block-head { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; padding: 10px 14px; background: var(--panel-2); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.block-head .bnum { font-size: 15px; font-weight: 700; color: var(--text); }
+.block-body { padding: 10px 14px; }
+.tx + .tx { border-top: 1px dashed var(--border); margin-top: 10px; padding-top: 10px; }
+.tx-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: 13px; }
+.method { font-weight: 700; font-size: 13px; }
+details { margin: 6px 0; font-size: 12px; }
+summary { cursor: pointer; color: var(--muted); }
+pre { margin: 6px 0 0; padding: 8px 10px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; overflow-x: auto; font-size: 12px; }
+.receipt { margin-top: 6px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.kv { color: var(--muted); } .kv b { color: var(--text); font-weight: 600; }
+#toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 20; width: min(420px, calc(100vw - 32px)); }
+.toast { padding: 10px 14px; border-radius: 8px; font-size: 13px; background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--idle); box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+.toast.ok { border-left-color: var(--ok); } .toast.bad { border-left-color: var(--bad); } .toast.pending { border-left-color: var(--accent); }
+.banner { background: var(--bad-bg); color: var(--bad); padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
+.banner:empty { display: none; }
+@media (max-width: 520px) { .row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">Aluguel de Carros
+      <span class="node"><span class="dot" id="node-dot"></span><span id="node-text">conectando…</span></span>
+    </div>
+    <div class="account">
+      <select id="account" aria-label="Conta"></select>
+      <code class="addr" id="account-addr" title="Clique para copiar o endereço"></code>
+      <span id="account-roles"></span>
+      <span id="account-balance"></span>
+    </div>
+  </div>
+  <nav role="tablist">
+    <button role="tab" data-tab="register">Cadastro</button>
+    <button role="tab" data-tab="fleet">Frota</button>
+    <button role="tab" data-tab="rent">Locação</button>
+    <button role="tab" data-tab="explorer">Explorador</button>
+  </nav>
+</header>
+
+<main>
+  <div class="banner" id="banner"></div>
+
+  <section class="tab" id="tab-register" hidden>
+    <div class="grid">
+      <form class="card" id="form-car">
+        <h2>Registrar um carro</h2>
+        <p class="sub">Emite um token de carro para o proprietário. Só o SHA-256 do documento vai on-chain.</p>
+        <label class="field">Proprietário <select name="owner" data-accounts="alice"></select></label>
+        <div class="row">
+          <label class="field">Diária <input name="rate" type="number" min="1" value="120" required></label>
+          <label class="field">Garantia mínima <input name="min" type="number" min="0" value="1000" required></label>
+        </div>
+        <label class="field">Documento off-chain <textarea name="doc" data-hashed></textarea></label>
+        <div class="hash"></div>
+        <div class="gate"><button class="primary" data-action data-role="REGISTRAR">Registrar carro</button><span class="gate-note"></span></div>
+        <div class="result"></div>
+      </form>
+
+      <form class="card" id="form-item">
+        <h2>Registrar um item de garantia</h2>
+        <p class="sub">Emite um token para um bem avaliado (relógio, notebook, segundo veículo) para o seu detentor.</p>
+        <label class="field">Detentor <select name="holder" data-accounts="bob"></select></label>
+        <label class="field">Valor avaliado <input name="value" type="number" min="1" value="600" required></label>
+        <label class="field">Laudo de avaliação <textarea name="doc" data-hashed></textarea></label>
+        <div class="hash"></div>
+        <div class="gate"><button class="primary" data-action data-role="REGISTRAR">Registrar item</button><span class="gate-note"></span></div>
+        <div class="result"></div>
+      </form>
+
+      <form class="card" id="form-mint">
+        <h2>Emitir tokens de depósito</h2>
+        <p class="sub">Faucet de teste. Em produção, seria uma stablecoin ou um saldo respaldado por banco.</p>
+        <label class="field">Para <select name="to" data-accounts="bob"></select></label>
+        <label class="field">Quantidade <input name="amount" type="number" min="1" value="1000" required></label>
+        <div class="gate"><button class="primary" data-action data-role="ADMIN">Emitir</button><span class="gate-note"></span></div>
+      </form>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-fleet" hidden>
+    <div class="card">
+      <div class="card-head"><h2>Carros</h2><button class="ghost" id="recheck">Reverificar documentos</button></div>
+      <div class="table-wrap"><table id="cars"></table></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Itens de garantia</h2></div>
+      <div class="table-wrap"><table id="items"></table></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Saldos de tokens de depósito</h2></div>
+      <div class="table-wrap"><table id="balances"></table></div>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-rent" hidden>
+    <div class="grid">
+      <form class="card" id="form-rent">
+        <h2>Iniciar uma locação</h2>
+        <p class="sub">Assinado como <b data-me></b>. O depósito e os itens empenhados vão para o escrow; o carro permanece com o proprietário, mas fica bloqueado.</p>
+        <label class="field">Carro <select name="car"></select></label>
+        <div class="row">
+          <label class="field">Dias <input name="days" type="number" min="1" value="3" required></label>
+          <label class="field">Tokens de depósito <input name="deposit" type="number" min="0" value="500" required></label>
+        </div>
+        <fieldset class="field"><legend>Empenhar itens de garantia</legend><div class="checks" id="pledge"></div></fieldset>
+        <label class="field">Laudo de vistoria da retirada <textarea name="report" data-hashed></textarea></label>
+        <div class="hash"></div>
+        <div class="summary" id="rent-summary"></div>
+        <div class="gate"><button class="primary" data-action>Iniciar locação</button><span class="gate-note"></span></div>
+      </form>
+
+      <form class="card" id="form-settle">
+        <h2>Liquidar uma devolução</h2>
+        <p class="sub">O vistoriador registra a devolução. O contrato paga o aluguel primeiro, depois cobra do depósito excedente, depois confisca itens na ordem de penhor.</p>
+        <label class="field">Locação <select name="rental"></select></label>
+        <label class="field">Cobrança por danos <input name="damage" type="number" min="0" value="0" required></label>
+        <label class="field">Laudo de vistoria da devolução <textarea name="report" data-hashed></textarea></label>
+        <div class="hash"></div>
+        <div class="summary" id="settle-summary"></div>
+        <div class="gate"><button class="primary" data-action data-role="INSPECTOR">Liquidar locação</button><span class="gate-note"></span></div>
+      </form>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Locações</h2></div>
+      <div class="table-wrap"><table id="rentals"></table></div>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-explorer" hidden>
+    <div class="toolbar">
+      <label>Mostrar os mais recentes
+        <select id="block-count"><option>10</option><option>25</option><option>50</option><option>100</option></select>
+        blocos</label>
+      <span>Altura da cadeia <b id="height">–</b></span>
+      <button class="ghost" id="reload">Atualizar</button>
+    </div>
+    <div id="blocks"></div>
+  </section>
+</main>
+<div id="toasts" aria-live="polite"></div>
+
+<script type="module">
+const HOST = location.hostname || "localhost";
+const NODE = `http://${HOST}:8080`;
+const META = `http://${HOST}:3001`; // armazenamento off-chain: car-<id>.json, item-<id>.json, checkout.json
+const DEV_ACCOUNTS = ["admin", "alice", "bob"]; // mesma derivação de crypto.DevKey no nó
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const TEMPLATES = {
+  car: { tipo: "carro", chassi: "9BD19734MR3021877", placa: "SUV-2B45", marca: "Fiat", modelo: "Pulse", ano: 2025, cor: "vermelho",
+         documento: "CRLV 2026", fotos: ["frente.jpg", "traseira.jpg", "esquerda.jpg", "direita.jpg"] },
+  item: { tipo: "garantia", descricao: "Notebook, 14 polegadas, com carregador", numeroSerie: "LP-77310-Q", valorAvaliado: 600,
+          avaliacao: { por: "registrador", metodo: "comparação de mercado" }, fotos: ["tampa.jpg", "numero-serie.jpg"] },
+  checkout: { tipo: "laudo-retirada", quilometragem: 18240, combustivel: "cheio", externo: "sem danos visíveis", interno: "limpo",
+              fotos: ["retirada-frente.jpg", "retirada-traseira.jpg"] },
+  checkin: { tipo: "laudo-devolucao", quilometragem: 18815, combustivel: "3/4", externo: "sem novos danos", interno: "limpo",
+             fotos: ["devolucao-frente.jpg", "devolucao-traseira.jpg"] },
+};
+
+const enc = new TextEncoder();
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const toHex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+const short = h => h && h.length > 16 ? `${h.slice(0, 8)}…${h.slice(-4)}` : (h || "–");
+const fmtTime = t => new Date(t).toLocaleString("pt-BR", { dateStyle: "medium", timeStyle: "short" });
+const nextFrame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } },
+                set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+
+async function sha256Hex(data) {
+  const bytes = typeof data === "string" ? enc.encode(data) : data;
+  return toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+}
+
+let accounts = [];  // { name, address, keyPair }
+let me;             // a conta selecionada; toda transação é assinada com sua chave
+let view = { assets: [], rentals: [], blocks: [], roles: [], balances: {}, tip: null };
+const docStatus = {}; // id do ativo -> verified | changed | missing | offline | none
+
+function nameOf(addr) {
+  if (addr === "escrow") return "escrow";
+  return accounts.find(a => a.address === addr)?.name ?? short(addr);
+}
+const who = addr => `<span title="${esc(addr)}">${esc(nameOf(addr))}</span>`;
+const asset = id => view.assets.find(a => a.id === id);
+
+// ---- Conversa com o nó (Design.md, seção 6) ----
+
+async function getJSON(path) {
+  const res = await fetch(NODE + path, { cache: "no-store" });
+  if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+  return res.json();
+}
+
+// A assinatura cobre JSON.stringify({from, method, args, nonce}); o nó
+// reconstrói exatamente esses bytes, então a ordem das chaves importa.
+async function submitTx(method, args) {
+  const body = { from: me.address, method, args, nonce: Date.now() };
+  const digest = nacl.hash(enc.encode(JSON.stringify(body)));
+  const signature = toHex(nacl.sign.detached(digest, me.keyPair.secretKey));
+  const res = await fetch(`${NODE}/tx`, { method: "POST", body: JSON.stringify({ ...body, signature }) });
+  const out = await res.json();
+  if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
+  return out; // { txHash, block, receipt }
+}
+
+async function runTx(button, method, args) {
+  const label = button.textContent;
+  button.dataset.busy = "1";
+  button.textContent = "assinando...";
+  applyGates();
+  const toast = showToast(`${method}: pendente…`, "pending");
+  await nextFrame();
+  try {
+    const sent = submitTx(method, args);
+    button.textContent = "pendente";
+    const res = await sent;
+    if (res.receipt.error) {
+      toast.set(`Rejeitada no bloco ${res.block}: ${res.receipt.error}. A tentativa foi registrada; o estado não mudou.`, "bad");
+    } else {
+      toast.set(`Confirmada no bloco ${res.block}`, "ok");
+    }
+    await refresh();
+    return res;
+  } catch (e) {
+    toast.set(`${method} não foi aceita pelo nó: ${e.message}. Nada foi registrado em bloco.`, "bad");
+  } finally {
+    button.textContent = label;
+    delete button.dataset.busy;
+    applyGates();
+  }
+}
+
+async function refresh() {
+  try {
+    const addrs = [...accounts.map(a => a.address), "escrow"];
+    const count = $("#block-count").value;
+    const [assets, rentals, blocks, roles, ...balances] = await Promise.all([
+      getJSON("/assets"), getJSON("/rentals"), getJSON(`/blocks?count=${count}`), getJSON(`/roles/${me.address}`),
+      ...addrs.map(a => getJSON(`/balance/0/${a}`)),
+    ]);
+    view = { assets, rentals, blocks, roles, tip: blocks[0], balances: Object.fromEntries(addrs.map((a, i) => [a, balances[i]])) };
+    setNodeStatus(true);
+    render();
+    verifyDocuments();
+  } catch (e) {
+    setNodeStatus(false);
+    render();
+  }
+}
+
+// Consulta o topo da cadeia periodicamente, para que transações enviadas por curl ou cmd/tx também apareçam.
+async function poll() {
+  try {
+    const [tip] = await getJSON("/blocks?count=1");
+    if (tip.hash !== view.tip?.hash) await refresh(); else setNodeStatus(true);
+  } catch {
+    setNodeStatus(false);
+  }
+}
+
+// ---- Documentos off-chain: calcula o hash do que o armazenamento serve, compara com a cadeia ----
+
+async function verifyDocuments() {
+  await Promise.all(view.assets.map(async a => {
+    if (!a.metadataHash) { docStatus[a.id] = "none"; return; }
+    try {
+      const res = await fetch(`${META}/${a.kind === "CAR" ? "car" : "item"}-${a.id}.json`, { cache: "no-store" });
+      if (!res.ok) { docStatus[a.id] = "missing"; return; }
+      const hash = "0x" + await sha256Hex(new Uint8Array(await res.arrayBuffer()));
+      docStatus[a.id] = hash === a.metadataHash ? "verified" : "changed";
+    } catch {
+      docStatus[a.id] = "offline";
+    }
+  }));
+  renderFleet();
+}
+
+function docChip(id) {
+  const [cls, text, title] = {
+    verified: ["ok", "documento verificado", "O hash do arquivo off-chain bate com o MetadataHash on-chain"],
+    changed: ["bad", "documento alterado", "O arquivo off-chain não bate mais com o hash registrado on-chain"],
+    missing: ["", "sem documento", "O armazenamento off-chain não tem um arquivo para este ativo"],
+    offline: ["", "armazenamento indisponível", `Não foi possível acessar ${META}`],
+    none: ["", "sem hash on-chain", "Registrado sem um hash de documento"],
+  }[docStatus[id]] ?? ["", "verificando…", ""];
+  return `<span class="chip ${cls}" title="${esc(title)}">${text}</span>`;
+}
+
+// ---- Renderização ----
+
+function setNodeStatus(ok) {
+  $("#node-dot").className = `dot ${ok ? "on" : "off"}`;
+  $("#node-text").textContent = ok
+    ? `nó ${NODE.replace("http://", "")} · bloco #${view.tip?.index ?? "?"}`
+    : `nó ${NODE.replace("http://", "")} inacessível`;
+  $("#banner").textContent = ok ? "" : `Não foi possível acessar o nó da blockchain em ${NODE}. Inicie-o com: go run ./cmd/node (ou docker compose up).`;
+}
+
+function render() {
+  renderHeader();
+  fillAccountSelects();
+  renderFleet();
+  renderRent();
+  renderExplorer();
+  applyGates();
+}
+
+function renderHeader() {
+  $("#account-addr").textContent = short(me.address);
+  $("#account-roles").innerHTML = view.roles.length
+    ? view.roles.map(r => `<span class="chip role">${esc(r)}</span>`).join(" ")
+    : `<span class="chip">sem papéis</span>`;
+  $("#account-balance").textContent = `${view.balances[me.address] ?? 0} tokens de depósito`;
+  $$("[data-me]").forEach(el => el.textContent = me.name);
+}
+
+function fillAccountSelects() {
+  for (const sel of $$("select[data-accounts]")) {
+    if (sel.options.length) continue;
+    sel.innerHTML = accounts.map(a => `<option value="${a.address}">${esc(a.name)}</option>`).join("");
+    sel.value = accounts.find(a => a.name === sel.dataset.accounts)?.address ?? accounts[0].address;
+  }
+}
+
+function renderFleet() {
+  const cars = view.assets.filter(a => a.kind === "CAR");
+  const items = view.assets.filter(a => a.kind === "COLLATERAL");
+  $("#cars").innerHTML = cars.length ? `
+    <tr><th>#</th><th>Status</th><th>Proprietário</th><th class="num">Diária</th><th class="num">Garantia mín.</th><th>Documento</th></tr>
+    ${cars.map(c => `<tr>
+      <td>${c.id}</td>
+      <td>${c.rented ? `<span class="chip warn">ALUGADO</span>` : `<span class="chip ok">DISPONÍVEL</span>`}</td>
+      <td>${who(c.owner)}</td>
+      <td class="num">${c.dailyRate}</td>
+      <td class="num">${c.value}</td>
+      <td>${docChip(c.id)}</td></tr>`).join("")}`
+    : `<tr><td class="empty">Nenhum carro registrado ainda.</td></tr>`;
+  $("#items").innerHTML = items.length ? `
+    <tr><th>#</th><th>Detentor</th><th class="num">Valor avaliado</th><th>Documento</th></tr>
+    ${items.map(i => `<tr>
+      <td>${i.id}</td>
+      <td>${i.holder === "escrow" ? `<span class="chip warn">EM CUSTÓDIA</span>` : who(i.holder)}</td>
+      <td class="num">${i.value}</td>
+      <td>${docChip(i.id)}</td></tr>`).join("")}`
+    : `<tr><td class="empty">Nenhum item de garantia registrado ainda.</td></tr>`;
+  $("#balances").innerHTML = `
+    <tr><th>Conta</th><th>Endereço</th><th class="num">Tokens de depósito</th></tr>
+    ${[...accounts.map(a => a.address), "escrow"].map(addr => `<tr>
+      <td>${esc(nameOf(addr))}</td>
+      <td><code>${addr === "escrow" ? "mantido pelo contrato" : esc(short(addr))}</code></td>
+      <td class="num">${view.balances[addr] ?? 0}</td></tr>`).join("")}`;
+}
+
+function renderRent() {
+  const form = $("#form-rent");
+  const cars = view.assets.filter(a => a.kind === "CAR");
+  const previous = Number(form.car.value);
+  form.car.innerHTML = cars.map(c => {
+    const why = c.rented ? " — ALUGADO" : c.owner === me.address ? " — seu carro" : "";
+    return `<option value="${c.id}" ${why ? "disabled" : ""}>#${c.id} · ${c.dailyRate}/dia · garantia mín. ${c.value} · proprietário ${esc(nameOf(c.owner))}${why}</option>`;
+  }).join("") || `<option disabled>Nenhum carro registrado</option>`;
+  const usable = [...form.car.options].filter(o => !o.disabled);
+  form.car.value = usable.some(o => Number(o.value) === previous) ? previous : (usable[0]?.value ?? "");
+
+  const checked = new Set($$("#pledge input:checked").map(i => Number(i.value)));
+  const mine = view.assets.filter(a => a.kind === "COLLATERAL" && a.holder === me.address);
+  $("#pledge").innerHTML = mine.length
+    ? mine.map(i => `<label><input type="checkbox" value="${i.id}" ${checked.has(i.id) ? "checked" : ""}> Item #${i.id} · avaliado em ${i.value}</label>`).join("")
+    : `<div class="empty">${esc(me.name)} não possui itens de garantia.</div>`;
+  updateRentSummary();
+
+  const settle = $("#form-settle");
+  const active = view.rentals.filter(r => r.status === "ACTIVE");
+  const prevRental = Number(settle.rental.value);
+  settle.rental.innerHTML = active.map(r =>
+    `<option value="${r.id}">Locação #${r.id} · carro #${r.carId} · locatário ${esc(nameOf(r.renter))} · vencimento ${esc(fmtTime(r.dueDate))}</option>`
+  ).join("") || `<option value="">Nenhuma locação ativa</option>`;
+  if (active.some(r => r.id === prevRental)) settle.rental.value = prevRental;
+  updateSettleSummary();
+
+  const RENTAL_STATUS_LABEL = { ACTIVE: "ATIVA", CLOSED: "ENCERRADA" };
+  $("#rentals").innerHTML = view.rentals.length ? `
+    <tr><th>#</th><th>Carro</th><th>Locatário</th><th>Proprietário</th><th>Início</th><th>Vencimento</th><th class="num">Depósito</th><th class="num">Aluguel pré-pago</th><th>Itens</th><th>Status</th></tr>
+    ${view.rentals.map(r => `<tr>
+      <td>${r.id}</td><td>#${r.carId}</td><td>${who(r.renter)}</td><td>${who(r.carOwner)}</td>
+      <td>${esc(fmtTime(r.start))}</td><td>${esc(fmtTime(r.dueDate))}</td>
+      <td class="num">${r.deposit}</td><td class="num">${r.prepaidRent}</td>
+      <td>${r.items.length ? r.items.map(i => "#" + i).join(", ") : "–"}</td>
+      <td><span class="chip ${r.status === "ACTIVE" ? "warn" : ""}" title="laudo de retirada ${esc(r.checkoutHash || "none")}${r.checkinHash ? `\nlaudo de devolução ${esc(r.checkinHash)}` : ""}">${esc(RENTAL_STATUS_LABEL[r.status] ?? r.status)}</span></td>
+    </tr>`).join("")}`
+    : `<tr><td class="empty">Nenhuma locação ainda.</td></tr>`;
+}
+
+function line(label, value, cls = "") {
+  return `<div class="${cls}"><span>${label}</span><span>${value}</span></div>`;
+}
+
+// Espelha as verificações de StartRental do contrato, para mostrar problemas antes de assinar.
+function updateRentSummary() {
+  const form = $("#form-rent");
+  const button = $("button", form);
+  const car = asset(Number(form.car.value));
+  if (!car) {
+    $("#rent-summary").innerHTML = `<div class="empty">Nenhum carro disponível para ${esc(me.name)}.</div>`;
+    button.dataset.blocked = "Nenhum carro disponível";
+    applyGates();
+    return;
+  }
+  delete button.dataset.blocked;
+  const days = Number(form.days.value) || 0;
+  const deposit = Number(form.deposit.value) || 0;
+  const items = $$("#pledge input:checked").map(i => asset(Number(i.value)));
+  const prepaid = car.dailyRate * days;
+  const itemsValue = items.reduce((sum, i) => sum + i.value, 0);
+  const cover = Math.max(deposit - prepaid, 0) + itemsValue;
+  const balance = view.balances[me.address] ?? 0;
+  const problems = [];
+  if (deposit < prepaid) problems.push(`depósito abaixo do aluguel pré-pago (${prepaid})`);
+  else if (cover < car.value) problems.push(`garantia insuficiente (${cover} de ${car.value})`);
+  if (balance < deposit) problems.push(`${me.name} possui apenas ${balance} tokens de depósito`);
+  $("#rent-summary").innerHTML =
+    line(`Aluguel pré-pago (${car.dailyRate} × ${days} dia${days === 1 ? "" : "s"})`, prepaid) +
+    line("Depósito excedente", Math.max(deposit - prepaid, 0)) +
+    line(`Itens empenhados (${items.length})`, itemsValue) +
+    line("Cobertura", `${cover} / ${car.value} necessário`, "total") +
+    (problems.length
+      ? `<span class="note warn-text">O contrato vai rejeitar isto: ${esc(problems.join("; "))}.</span>`
+      : `<span class="note ok-text">Cobre a garantia mínima do carro.</span>`);
+  applyGates();
+}
+
+// Mesma aritmética do SettleRental, com o relógio local no lugar do horário do bloco.
+function settlementPreview(rental, damage, now) {
+  const car = asset(rental.carId);
+  const lateDays = now > Date.parse(rental.dueDate) ? Math.floor((now - Date.parse(rental.dueDate)) / DAY_MS) + 1 : 0;
+  const lateFee = Math.floor(lateDays * car.dailyRate * 3 / 2);
+  const owed = lateFee + damage;
+  const spare = rental.deposit - rental.prepaidRent;
+  const fromDeposit = Math.min(owed, spare);
+  let shortfall = owed - fromDeposit;
+  const seized = [];
+  for (const id of rental.items) {
+    if (shortfall === 0) break;
+    seized.push(id);
+    shortfall -= Math.min(shortfall, asset(id).value);
+  }
+  return { lateDays, lateFee, toOwner: rental.prepaidRent + fromDeposit, refund: spare - fromDeposit, seized, unpaid: shortfall };
+}
+
+function updateSettleSummary() {
+  const form = $("#form-settle");
+  const button = $("button", form);
+  const rental = view.rentals.find(r => r.id === Number(form.rental.value));
+  if (!rental) {
+    $("#settle-summary").innerHTML = `<div class="empty">Nada para liquidar.</div>`;
+    button.dataset.blocked = "Nenhuma locação ativa para liquidar";
+    applyGates();
+    return;
+  }
+  delete button.dataset.blocked;
+  const p = settlementPreview(rental, Number(form.damage.value) || 0, Date.now());
+  const returned = rental.items.filter(id => !p.seized.includes(id));
+  $("#settle-summary").innerHTML =
+    line(`Multa por atraso${p.lateDays ? ` (${p.lateDays} dia${p.lateDays > 1 ? "s" : ""} × 1,5 da diária)` : ""}`, p.lateFee) +
+    line(`Proprietário ${esc(nameOf(rental.carOwner))} recebe`, `${p.toOwner} tokens`, "total") +
+    line(`Locatário ${esc(nameOf(rental.renter))} recebe de volta`, `${p.refund} tokens`) +
+    line("Itens devolvidos", returned.length ? returned.map(i => "#" + i).join(", ") : "–") +
+    line("Itens confiscados", p.seized.length ? `<span class="bad-text">${p.seized.map(i => "#" + i).join(", ")}</span>` : "–") +
+    (p.unpaid ? line("Não pago", `<span class="bad-text">${p.unpaid}</span>`) : "") +
+    `<span class="note">Prévia. O contrato calcula a multa por atraso a partir do timestamp do bloco.</span>`;
+  applyGates();
+}
+
+function renderExplorer() {
+  $("#height").textContent = view.tip?.index ?? "–";
+  $("#blocks").innerHTML = view.blocks.map(b => `
+    <article class="block">
+      <div class="block-head">
+        <span class="bnum">#${b.index}</span>
+        <span>${esc(fmtTime(b.timestamp))}</span>
+        <span>hash <code title="${esc(b.hash)}">${esc(short(b.hash))}</code></span>
+        <span>anterior <code title="${esc(b.prevHash)}">${esc(short(b.prevHash))}</code></span>
+        <span>estado <code title="${esc(b.stateHash)}">${esc(short(b.stateHash))}</code></span>
+        <span>selado por ${who(b.validator)}</span>
+      </div>
+      <div class="block-body">
+        ${b.txs.length ? b.txs.map((tx, i) => renderTx(tx, b.receipts[i])).join("")
+          : `<div class="empty">Bloco gênese. O validador ${esc(nameOf(b.validator))} começa com os papéis ADMIN, REGISTRAR e INSPECTOR.</div>`}
+      </div>
+    </article>`).join("");
+}
+
+function renderTx(tx, receipt) {
+  const outcome = receipt.error
+    ? `<span class="chip bad">REJEITADA</span><span class="bad-text">${esc(receipt.error)}</span><span class="kv">registrada on-chain, estado inalterado</span>`
+    : (receipt.events ?? []).map(ev => `<span class="chip ok">${esc(ev.name)}</span>${
+        Object.entries(ev.data).map(([k, v]) => `<span class="kv">${esc(k)} <b>${fmtValue(k, v)}</b></span>`).join("")}`).join("");
+  return `
+    <div class="tx">
+      <div class="tx-head">
+        <code class="method">${esc(tx.method)}</code>
+        <span>de <b>${who(tx.from)}</b></span>
+        <span class="kv">nonce ${esc(tx.nonce)}</span>
+        <span class="kv">tx <code title="${esc(tx.hash)}">${esc(short(tx.hash))}</code></span>
+      </div>
+      <details><summary>argumentos e assinatura</summary><pre>${esc(JSON.stringify(tx.args, null, 2))}\n\nassinatura ${esc(tx.signature)}</pre></details>
+      <div class="receipt">${outcome}</div>
+    </div>`;
+}
+
+function fmtValue(key, v) {
+  if (typeof v === "string" && (/^[0-9a-f]{64}$/.test(v) || v === "escrow")) return who(v);
+  if (key === "dueDate") return esc(fmtTime(v));
+  if (Array.isArray(v)) return v.length ? v.map(x => "#" + x).join(", ") : "nenhum";
+  return esc(v);
+}
+
+// Ações que exigem um papel ficam desabilitadas para contas sem esse papel,
+// espelhando a verificação on-chain em vez de deixar o usuário assinar e falhar.
+function applyGates() {
+  for (const button of $$("button[data-action]")) {
+    const role = button.dataset.role;
+    const missing = role && !view.roles.includes(role);
+    const reason = missing ? `Requer o papel ${role}; ${me.name} não o possui` : (button.dataset.blocked ?? "");
+    button.disabled = Boolean(button.dataset.busy || reason);
+    const gate = button.closest(".gate");
+    gate.title = reason;
+    $(".gate-note", gate).textContent = missing ? `Requer o papel ${role}` : reason;
+  }
+}
+
+function showToast(text, kind) {
+  const el = document.createElement("div");
+  el.className = `toast ${kind}`;
+  el.textContent = text;
+  $("#toasts").append(el);
+  return {
+    set(t, k) {
+      el.textContent = t;
+      el.className = `toast ${k}`;
+      setTimeout(() => el.remove(), k === "ok" ? 5000 : 9000);
+    },
+  };
+}
+
+function offerDownload(form, fileName, doc, message) {
+  const url = URL.createObjectURL(new Blob([doc], { type: "application/json" }));
+  $(".result", form).innerHTML = `${esc(message)} A aba Frota verifica o arquivo comparando com <code>meta/${esc(fileName)}</code>:
+    <a href="${url}" download="${esc(fileName)}">baixar ${esc(fileName)}</a> e salve-o lá.`;
+}
+
+// ---- Ligações de eventos ----
+
+function showTab(name) {
+  if (!$(`#tab-${name}`)) name = "fleet";
+  $$(".tab").forEach(s => s.hidden = s.id !== `tab-${name}`);
+  $$("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === name));
+  history.replaceState(null, "", `#${name}`);
+}
+
+function bindHashPreview(textarea) {
+  const out = textarea.closest(".field").nextElementSibling;
+  const update = async () => { out.textContent = `SHA-256 0x${await sha256Hex(textarea.value)}`; };
+  textarea.addEventListener("input", update);
+  update();
+}
+
+async function loadTemplates() {
+  $("#form-car").doc.value = JSON.stringify(TEMPLATES.car, null, 2) + "\n";
+  $("#form-item").doc.value = JSON.stringify(TEMPLATES.item, null, 2) + "\n";
+  $("#form-settle").report.value = JSON.stringify(TEMPLATES.checkin, null, 2) + "\n";
+  try {
+    const res = await fetch(`${META}/checkout.pt-BR.json`, { cache: "no-store" });
+    if (!res.ok) throw new Error();
+    $("#form-rent").report.value = await res.text();
+  } catch {
+    $("#form-rent").report.value = JSON.stringify(TEMPLATES.checkout, null, 2) + "\n";
+  }
+  $$("textarea[data-hashed]").forEach(bindHashPreview);
+}
+
+function bindForms() {
+  $("#form-car").addEventListener("submit", async e => {
+    e.preventDefault();
+    const f = e.target;
+    const doc = f.doc.value;
+    const res = await runTx(e.submitter, "RegisterCar", {
+      Owner: f.owner.value, MetadataHash: await sha256Hex(doc), DailyRate: Number(f.rate.value), MinCollateral: Number(f.min.value) });
+    const ev = res?.receipt.events?.[0];
+    if (ev) offerDownload(f, `car-${ev.data.carId}.json`, doc, `Carro #${ev.data.carId} registrado no bloco ${res.block}.`);
+  });
+
+  $("#form-item").addEventListener("submit", async e => {
+    e.preventDefault();
+    const f = e.target;
+    const doc = f.doc.value;
+    const res = await runTx(e.submitter, "RegisterCollateral", {
+      Holder: f.holder.value, MetadataHash: await sha256Hex(doc), Value: Number(f.value.value) });
+    const ev = res?.receipt.events?.[0];
+    if (ev) offerDownload(f, `item-${ev.data.itemId}.json`, doc, `Item #${ev.data.itemId} registrado no bloco ${res.block}.`);
+  });
+
+  $("#form-mint").addEventListener("submit", async e => {
+    e.preventDefault();
+    const f = e.target;
+    await runTx(e.submitter, "MintDeposit", { To: f.to.value, Amount: Number(f.amount.value) });
+  });
+
+  const rent = $("#form-rent");
+  rent.addEventListener("input", updateRentSummary);
+  rent.addEventListener("submit", async e => {
+    e.preventDefault();
+    await runTx(e.submitter, "StartRental", {
+      CarID: Number(rent.car.value), DaysPlanned: Number(rent.days.value),
+      Items: $$("#pledge input:checked").map(i => Number(i.value)),
+      Deposit: Number(rent.deposit.value), CheckoutHash: await sha256Hex(rent.report.value) });
+  });
+
+  const settle = $("#form-settle");
+  settle.addEventListener("input", updateSettleSummary);
+  settle.addEventListener("submit", async e => {
+    e.preventDefault();
+    await runTx(e.submitter, "SettleRental", {
+      RentalID: Number(settle.rental.value), DamageCharge: Number(settle.damage.value),
+      CheckinHash: await sha256Hex(settle.report.value) });
+  });
+
+  $("#recheck").addEventListener("click", verifyDocuments);
+  $("#reload").addEventListener("click", refresh);
+  $("#block-count").addEventListener("change", refresh);
+  $("#account-addr").addEventListener("click", () => navigator.clipboard?.writeText(me.address));
+  $$("nav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+}
+
+async function init() {
+  if (!window.nacl) {
+    $("#banner").textContent = "Não foi possível carregar o tweetnacl de cdn.jsdelivr.net, que assina as transações. Verifique a conexão com a internet e recarregue a página.";
+    return;
+  }
+  if (!window.crypto?.subtle) {
+    $("#banner").textContent = "A Web Crypto não está disponível. Abra esta página a partir de http://localhost (um contexto seguro), não de um endereço de LAN.";
+    return;
+  }
+  for (const name of DEV_ACCOUNTS) {
+    const seed = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode("car-rental dev account: " + name)));
+    const keyPair = nacl.sign.keyPair.fromSeed(seed);
+    accounts.push({ name, address: toHex(keyPair.publicKey), keyPair });
+  }
+  me = accounts.find(a => a.name === store.get("account")) ?? accounts.find(a => a.name === "bob");
+
+  const picker = $("#account");
+  picker.innerHTML = accounts.map(a => `<option value="${a.name}">${esc(a.name)}</option>`).join("");
+  picker.value = me.name;
+  picker.addEventListener("change", () => {
+    me = accounts.find(a => a.name === picker.value);
+    store.set("account", me.name);
+    refresh();
+  });
+
+  showTab(location.hash.slice(1));
+  bindForms();
+  await loadTemplates();
+  await refresh();
+  setInterval(poll, 3000);
+}
+
+init();
+</script>
+</body>
+</html>
