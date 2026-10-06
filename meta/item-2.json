@@ -1,9 +1,0 @@
-{
-  "type": "collateral",
-  "description": "Automatic wristwatch, steel case, with box and papers",
-  "serial": "WX-58213-A",
-  "appraisedValue": 800,
-  "appraisal": { "by": "registrar", "date": "2026-09-26", "method": "market comparison" },
-  "custody": "held by the registrar's custodian while pledged",
-  "photos": ["item-2-dial.jpg", "item-2-caseback.jpg"]
-}

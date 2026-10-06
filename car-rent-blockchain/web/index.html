@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aluguel de Carros com Blockchain</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --text: #1d2330; --muted: #5d6677; --border: #d9dde5;
+    --accent: #1f5fd1; --accent-text: #ffffff; --ok: #12703c; --ok-bg: #dff5e8;
+    --err: #b3261e; --err-bg: #fde4e1; --warn: #8a5a00; --warn-bg: #fff0cc; --zeros: #12703c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151c; --surface: #1b202b; --text: #e8ebf2; --muted: #9aa3b5; --border: #323a4b;
+      --accent: #6b9bff; --accent-text: #0b1020; --ok: #5fd08b; --ok-bg: #153524;
+      --err: #ff8b82; --err-bg: #3b1a18; --warn: #f2c35b; --warn-bg: #3a2d0e; --zeros: #5fd08b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between; }
+  h1 { font-size: 1.15rem; margin: 0; }
+  h2 { font-size: 1.05rem; margin: 0 0 12px; }
+  h3 { font-size: 0.95rem; margin: 20px 0 8px; }
+  .who { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .who .acct { color: var(--muted); font-size: 0.9rem; }
+  nav { display: flex; gap: 4px; padding: 8px 16px 0; overflow-x: auto; border-bottom: 1px solid var(--border); background: var(--surface); }
+  nav button { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 8px 14px; border-radius: 8px 8px 0 0; font: inherit; cursor: pointer; white-space: nowrap; }
+  nav button[aria-selected="true"] { background: var(--bg); color: var(--text); border-color: var(--border); font-weight: 600; margin-bottom: -1px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  section.panel[hidden] { display: none; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  form.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+  input, select, textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; min-width: 0; }
+  input[type=number] { width: 9rem; }
+  textarea { width: 100%; min-height: 6rem; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.85rem; }
+  button.btn { font: inherit; background: var(--accent); color: var(--accent-text); border: 0; border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+  button.btn.secondary { background: none; color: var(--accent); border: 1px solid var(--accent); }
+  button.btn.danger { background: var(--err); color: #fff; }
+  button.btn.small { padding: 4px 10px; font-size: 0.85rem; }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); font-style: italic; }
+  .badge { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 0.8rem; background: var(--bg); border: 1px solid var(--border); }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+  .badge.err { background: var(--err-bg); color: var(--err); border-color: transparent; }
+  .badge.warn { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+  .hint { color: var(--muted); font-size: 0.9rem; margin: 8px 0 0; }
+  .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.85rem; word-break: break-all; }
+  .zeros { color: var(--zeros); font-weight: 700; }
+  .summary-bar { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; }
+  .summary-bar .stat { color: var(--muted); }
+  .summary-bar .stat b { color: var(--text); }
+  .reason { margin: 10px 0 0; color: var(--err); }
+  .blocks { display: grid; gap: 8px; }
+  .block-row { display: grid; grid-template-columns: 4.5rem 9.5rem 1fr 1fr; gap: 4px 12px; text-align: left; width: 100%; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; cursor: pointer; align-items: baseline; }
+  .block-row[aria-current="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .block-row.bad { border-color: var(--err); background: var(--err-bg); }
+  .block-row .what { grid-column: 1 / -1; color: var(--muted); font-size: 0.9rem; }
+  .block-row .idx { font-weight: 700; }
+  @media (max-width: 640px) { .block-row { grid-template-columns: 1fr 1fr; } }
+  dl.fields { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+  dl.fields dt { color: var(--muted); }
+  dl.fields dd { margin: 0; min-width: 0; }
+  details { margin-top: 10px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: min(92vw, 560px); padding: 10px 16px; border-radius: 8px; background: var(--text); color: var(--bg); box-shadow: 0 4px 16px rgba(0,0,0,.25); }
+  #toast.err { background: var(--err); color: #fff; }
+  #toast[hidden] { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Aluguel de Carros com Blockchain</h1>
+  <div class="who">
+    <label style="flex-direction:row;align-items:center;gap:8px;color:var(--text);font-size:1rem" for="role">Atuar como:
+      <select id="role">
+        <option value="ADMIN">Administrador</option>
+        <option value="OWNER">Proprietário</option>
+        <option value="RENTER">Locatário</option>
+      </select>
+    </label>
+    <span class="acct" id="acct" aria-live="polite"></span>
+  </div>
+</header>
+<nav id="tabs" role="tablist" aria-label="Seções"></nav>
+
+<main>
+  <!-- Frota -->
+  <section class="panel" id="tab-fleet" role="tabpanel" hidden>
+    <div class="card">
+      <h2>Frota</h2>
+      <div id="fleetList"></div>
+    </div>
+  </section>
+
+  <!-- Meus carros (Proprietário) -->
+  <section class="panel" id="tab-owner" role="tabpanel" hidden>
+    <div class="card">
+      <h2>Registrar carro</h2>
+      <form class="row" id="formRegister">
+        <label>Diária (tokens)<input type="number" id="regRate" min="1" step="1" required></label>
+        <label>Depósito mínimo (tokens)<input type="number" id="regMin" min="0" step="1" required></label>
+        <button class="btn" type="submit">Registrar carro</button>
+      </form>
+    </div>
+    <div class="card"><h2>Meus carros</h2><div id="myCars"></div></div>
+    <div class="card"><h2>Locações dos meus carros</h2><div id="ownerRentals"></div></div>
+  </section>
+
+  <!-- Alugar (Locatário) -->
+  <section class="panel" id="tab-renter" role="tabpanel" hidden>
+    <div class="card">
+      <h2>Iniciar locação</h2>
+      <form class="row" id="formRent">
+        <label>Carro<select id="rentCar" required></select></label>
+        <label>Dias<input type="number" id="rentDays" min="1" max="365" step="1" value="1" required></label>
+        <label>Depósito (tokens)<input type="number" id="rentDeposit" min="0" step="1" required></label>
+        <button class="btn" type="submit">Iniciar locação</button>
+      </form>
+      <p class="hint" id="rentEstimate"></p>
+    </div>
+    <div class="card"><h2>Minhas locações</h2><div id="myRentals"></div></div>
+  </section>
+
+  <!-- Administração -->
+  <section class="panel" id="tab-admin" role="tabpanel" hidden>
+    <div class="card">
+      <h2>Emitir tokens de depósito</h2>
+      <form class="row" id="formMint">
+        <label>Conta<select id="mintTo" required></select></label>
+        <label>Quantidade<input type="number" id="mintAmount" min="1" step="1" required></label>
+        <button class="btn" type="submit">Emitir tokens</button>
+      </form>
+    </div>
+    <div class="card"><h2>Aguardando inspeção</h2><div id="toSettle"></div></div>
+    <div class="card"><h2>Todas as locações</h2><div id="adminRentals"></div></div>
+  </section>
+
+  <!-- Explorador da Blockchain -->
+  <section class="panel" id="tab-explorer" role="tabpanel" hidden>
+    <div class="card">
+      <div class="summary-bar">
+        <span id="chainBadge"></span>
+        <span class="stat">Blocos: <b id="statBlocks">0</b></span>
+        <span class="stat">Dificuldade: <b id="statDifficulty">0</b></span>
+        <button class="btn secondary small" id="btnValidate" type="button">Validar cadeia</button>
+      </div>
+      <p class="reason" id="chainReason" hidden></p>
+    </div>
+    <div class="grid2">
+      <div>
+        <h2>Blocos (mais recente primeiro)</h2>
+        <div class="blocks" id="blockList"></div>
+      </div>
+      <div>
+        <h2>Detalhe do bloco</h2>
+        <div class="card" id="blockDetail"><p class="empty">Selecione um bloco na lista.</p></div>
+        <h2>Estado derivado da cadeia</h2>
+        <div class="card" id="statePanel"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+"use strict";
+
+// ---- pt-BR texts (every user-facing string of the UI lives here) ----
+const T = {
+  tabs: { fleet: "Frota", owner: "Meus carros", renter: "Alugar", admin: "Administração", explorer: "Explorador da Blockchain" },
+  roles: { ADMIN: "Administrador", OWNER: "Proprietário", RENTER: "Locatário" },
+  carStatus: { AVAILABLE: "Disponível", RENTED: "Alugado" },
+  rentalStatus: { ACTIVE: "Em andamento", RETURNED: "Aguardando inspeção", CLOSED: "Encerrada" },
+  account: "Conta", balance: "Saldo", tokens: "tokens",
+  noCars: "Nenhum carro registrado ainda.", noRentals: "Nenhuma locação.", noneToSettle: "Nenhuma locação aguardando inspeção.",
+  noAvailableCars: "Nenhum carro disponível",
+  cols: {
+    id: "Nº", owner: "Proprietário", rate: "Diária", minDeposit: "Depósito mínimo", status: "Situação", car: "Carro",
+    renter: "Locatário", days: "Dias", rent: "Aluguel", deposit: "Depósito", paid: "Pago ao proprietário",
+    refunded: "Devolvido ao locatário", unpaid: "Não coberto", actions: "Ações", damage: "Cobrança por danos",
+    name: "Conta", role: "Papel", balance: "Saldo"
+  },
+  giveBack: "Devolver carro", settle: "Liquidar",
+  estimate: (rent, need) => `Aluguel: ${rent} tokens · Depósito mínimo exigido: ${need} tokens`,
+  invalidNumber: "Informe números inteiros válidos.",
+  networkError: "Não foi possível falar com o servidor.",
+  ok: {
+    MintDeposit: (r) => `Tokens emitidos no bloco #${r.block.index}.`,
+    RegisterCar: (r) => `Carro #${r.receipt.carId} registrado no bloco #${r.block.index}.`,
+    StartRental: (r) => `Locação #${r.receipt.rentalId} iniciada no bloco #${r.block.index}.`,
+    ReturnCar: (r) => `Carro devolvido no bloco #${r.block.index}. Aguardando inspeção.`,
+    SettleRental: (r) => `Locação liquidada no bloco #${r.block.index}: ${r.receipt.paid || 0} para o proprietário, ${r.receipt.refunded || 0} devolvidos ao locatário` +
+      (r.receipt.unpaid ? `, ${r.receipt.unpaid} não cobertos.` : ".")
+  },
+  chainValid: "Cadeia válida", chainInvalid: (n) => `Cadeia inválida: bloco #${n}`,
+  validated: "Cadeia verificada.",
+  blocks: "Blocos", difficulty: "Dificuldade",
+  genesisSummary: "Bloco gênesis: início da cadeia.",
+  noBlockSelected: "Selecione um bloco na lista.",
+  f: { index: "Índice", time: "Data/hora", nonce: "Nonce", hash: "Hash", prev: "Hash anterior", data: "Dados", recomputed: "Hash recalculado", tx: "Transação" },
+  match: "confere", mismatch: "não confere: os dados foram alterados",
+  none: "(nenhum)", rawJson: "Dados brutos (JSON)", goPrev: "ir para o bloco",
+  tamperTitle: "Adulterar dados (demonstração)",
+  tamperHint: "Altera os dados do bloco sem refazer a mineração. Observe a cadeia ficar inválida. A opção Restaurar desfaz a alteração.",
+  tamperBtn: "Adulterar dados", restoreBtn: "Restaurar", tampered: "adulterado", tamperedDone: "Dados do bloco adulterados.", restored: "Bloco restaurado.",
+  stateBalances: "Saldos", escrow: "Custódia (escrow)", minted: "Total emitido", held: "Total em contas e custódia",
+  cars: "Carros", rentals: "Locações"
+};
+
+// ---- roles and tabs ----
+const ROLES = {
+  ADMIN:  { account: "admin", tabs: ["fleet", "admin", "explorer"] },
+  OWNER:  { account: "alice", tabs: ["fleet", "owner", "explorer"] },
+  RENTER: { account: "bob",   tabs: ["fleet", "renter", "explorer"] }
+};
+
+const S = {
+  role: "RENTER", tab: "fleet", config: { debug: false, difficulty: 0 },
+  blocks: [], accounts: [], escrow: 0, minted: 0, cars: [], rentals: [], validation: { valida: true },
+  selected: null, detailSig: ""
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function store(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* page works without it */ } }
+function recall(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+
+// ---- server calls ----
+async function api(path, opts) {
+  let res;
+  try { res = await fetch("/api" + path, opts); } catch (e) { throw { body: null }; }
+  let body = null;
+  try { body = await res.json(); } catch (e) { /* no body */ }
+  if (!res.ok) throw { status: res.status, body };
+  return body;
+}
+
+let toastTimer = 0;
+function toast(text, kind) {
+  const el = $("toast");
+  el.textContent = text;
+  el.className = kind === "err" ? "err" : "";
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 5000);
+}
+
+async function sendTx(method, args) {
+  const from = ROLES[S.role].account;
+  const acct = S.accounts.find((a) => a.name === from);
+  const tx = { from, method, args, nonce: acct ? acct.nextNonce : 1 };
+  try {
+    const res = await api("/tx", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(tx) });
+    toast(T.ok[method](res), "ok");
+    await refresh();
+    return true;
+  } catch (e) {
+    toast((e.body && e.body.mensagem) || T.networkError, "err");
+    await refresh();
+    return false;
+  }
+}
+
+async function refresh() {
+  try {
+    const [cfg, blocks, accts, cars, rentals, validation] = await Promise.all([
+      api("/config"), api("/blocks"), api("/accounts"), api("/cars"), api("/rentals"), api("/validate")
+    ]);
+    S.config = cfg; S.blocks = blocks.blocks; S.accounts = accts.accounts; S.escrow = accts.escrow; S.minted = accts.minted;
+    S.cars = cars.cars; S.rentals = rentals.rentals; S.validation = validation;
+    if (S.selected === null && S.blocks.length) S.selected = S.blocks[S.blocks.length - 1].index;
+  } catch (e) { return; }
+  renderAll();
+}
+
+// ---- formatting ----
+const pad = (n) => String(n).padStart(2, "0");
+function fmtDate(ms) {
+  const d = new Date(ms);
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+function hashHtml(h, n) {
+  const shown = n ? h.slice(0, n) : h;
+  const zeros = shown.match(/^0*/)[0].length;
+  return `<span class="mono"><span class="zeros">${esc(shown.slice(0, zeros))}</span>${esc(shown.slice(zeros))}${n && h.length > n ? "…" : ""}</span>`;
+}
+const carBadge = (s) => `<span class="badge ${s === "AVAILABLE" ? "ok" : "warn"}">${T.carStatus[s]}</span>`;
+const rentalBadge = (s) => `<span class="badge ${s === "CLOSED" ? "" : s === "RETURNED" ? "warn" : "ok"}">${T.rentalStatus[s]}</span>`;
+const account = () => ROLES[S.role].account;
+
+// ---- tables ----
+function carsTable(list) {
+  if (!list.length) return `<p class="empty">${T.noCars}</p>`;
+  const c = T.cols;
+  return `<div class="table-wrap"><table><thead><tr><th class="num">${c.id}</th><th>${c.owner}</th><th class="num">${c.rate}</th><th class="num">${c.minDeposit}</th><th>${c.status}</th></tr></thead><tbody>` +
+    list.map((x) => `<tr><td class="num">${x.id}</td><td>${esc(x.owner)}</td><td class="num">${x.dailyRate}</td><td class="num">${x.minDeposit}</td><td>${carBadge(x.status)}</td></tr>`).join("") +
+    `</tbody></table></div>`;
+}
+
+// actions: "renter" adds the Devolver button, "settle" adds the damage field and Liquidar button
+function rentalsTable(list, actions) {
+  if (!list.length) return `<p class="empty">${actions === "settle" ? T.noneToSettle : T.noRentals}</p>`;
+  const c = T.cols;
+  const head = `<th class="num">${c.id}</th><th class="num">${c.car}</th><th>${c.renter}</th><th>${c.owner}</th><th class="num">${c.days}</th><th class="num">${c.rent}</th><th class="num">${c.deposit}</th><th>${c.status}</th>` +
+    (actions === "settle" ? `<th>${c.damage}</th><th>${c.actions}</th>` : actions === "renter" ? `<th>${c.actions}</th>` : `<th class="num">${c.paid}</th><th class="num">${c.refunded}</th><th class="num">${c.unpaid}</th>`);
+  const rows = list.map((r) => {
+    let tail;
+    if (actions === "settle") {
+      tail = `<td><input type="number" min="0" step="1" value="0" aria-label="${c.damage}" data-damage="${r.id}" style="width:7rem"></td><td><button class="btn small" data-act="settle" data-id="${r.id}">${T.settle}</button></td>`;
+    } else if (actions === "renter") {
+      tail = `<td>${r.status === "ACTIVE" ? `<button class="btn small" data-act="return" data-id="${r.id}">${T.giveBack}</button>` : ""}</td>`;
+    } else {
+      tail = r.status === "CLOSED" ? `<td class="num">${r.paid}</td><td class="num">${r.refunded}</td><td class="num">${r.unpaid}</td>` : `<td class="num">-</td><td class="num">-</td><td class="num">-</td>`;
+    }
+    return `<tr><td class="num">${r.id}</td><td class="num">${r.carId}</td><td>${esc(r.renter)}</td><td>${esc(r.owner)}</td><td class="num">${r.days}</td><td class="num">${r.rent}</td><td class="num">${r.deposit}</td><td>${rentalBadge(r.status)}</td>${tail}</tr>`;
+  });
+  return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
+}
+
+// Replaces <option>s but keeps the user's current choice when it still exists.
+function setOptions(select, options) {
+  const sig = JSON.stringify(options);
+  if (select.dataset.sig === sig) return;
+  const prev = select.value;
+  select.innerHTML = options.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("");
+  if (options.some((o) => o.value === prev)) select.value = prev;
+  select.dataset.sig = sig;
+}
+
+// ---- rendering ----
+function setHtml(id, html) {
+  const el = $(id);
+  if (el.dataset.sig !== html) { el.innerHTML = html; el.dataset.sig = html; }
+}
+
+function renderHeader() {
+  const me = S.accounts.find((a) => a.name === account());
+  $("acct").textContent = `${T.account}: ${account()}` + (me ? ` · ${T.balance}: ${me.balance} ${T.tokens}` : "");
+}
+
+function renderTabs() {
+  const tabs = ROLES[S.role].tabs;
+  if (!tabs.includes(S.tab)) S.tab = "fleet";
+  const html = tabs.map((t) => `<button type="button" role="tab" data-tab="${t}" aria-selected="${t === S.tab}">${T.tabs[t]}</button>`).join("");
+  setHtml("tabs", html);
+  document.querySelectorAll("main > section.panel").forEach((p) => { p.hidden = p.id !== "tab-" + S.tab; });
+}
+
+function renderFleet() { setHtml("fleetList", carsTable(S.cars)); }
+
+function renderOwner() {
+  setHtml("myCars", carsTable(S.cars.filter((c) => c.owner === account())));
+  setHtml("ownerRentals", rentalsTable(S.rentals.filter((r) => r.owner === account())));
+}
+
+function renderRenter() {
+  const avail = S.cars.filter((c) => c.status === "AVAILABLE");
+  setOptions($("rentCar"), avail.length
+    ? avail.map((c) => ({ value: String(c.id), label: `Carro #${c.id} · diária ${c.dailyRate} · depósito mín. ${c.minDeposit}` }))
+    : [{ value: "", label: T.noAvailableCars }]);
+  updateEstimate();
+  setHtml("myRentals", rentalsTable(S.rentals.filter((r) => r.renter === account()), "renter"));
+}
+
+function updateEstimate() {
+  const car = S.cars.find((c) => String(c.id) === $("rentCar").value);
+  const days = Number($("rentDays").value);
+  if (!car || !Number.isInteger(days) || days < 1) { $("rentEstimate").textContent = ""; return; }
+  const rent = days * car.dailyRate, need = Math.max(rent, car.minDeposit);
+  $("rentEstimate").textContent = T.estimate(rent, need);
+  const dep = $("rentDeposit");
+  if (!dep.dataset.touched) dep.value = need;
+}
+
+function renderAdmin() {
+  setOptions($("mintTo"), S.accounts.map((a) => ({ value: a.name, label: `${a.name} (${T.roles[a.role]})` })));
+  setHtml("toSettle", rentalsTable(S.rentals.filter((r) => r.status === "RETURNED"), "settle"));
+  setHtml("adminRentals", rentalsTable(S.rentals));
+}
+
+function renderExplorer() {
+  const v = S.validation;
+  $("chainBadge").innerHTML = v.valida
+    ? `<span class="badge ok">${T.chainValid}</span>`
+    : `<span class="badge err">${T.chainInvalid(v.blocoInvalido)}</span>`;
+  $("chainReason").hidden = v.valida;
+  $("chainReason").textContent = v.valida ? "" : (v.motivo || "");
+  $("statBlocks").textContent = S.blocks.length;
+  $("statDifficulty").textContent = S.config.difficulty;
+
+  const bad = v.valida ? -1 : v.blocoInvalido;
+  const rows = S.blocks.slice().reverse().map((b) => {
+    const what = b.index === 0 ? T.genesisSummary : b.summary;
+    return `<button type="button" class="block-row${b.index === bad ? " bad" : ""}" data-block="${b.index}" aria-current="${b.index === S.selected}">` +
+      `<span class="idx">#${b.index}${b.tampered ? ` <span class="badge err">${T.tampered}</span>` : ""}</span>` +
+      `<span>${fmtDate(b.timestamp)}</span>${hashHtml(b.hash, 12)}${b.previousHash ? hashHtml(b.previousHash, 12) : `<span class="empty">${T.none}</span>`}` +
+      `<span class="what">${esc(what)}</span></button>`;
+  });
+  setHtml("blockList", rows.join(""));
+  renderBlockDetail();
+  renderStatePanel();
+}
+
+function renderBlockDetail() {
+  const b = S.blocks.find((x) => x.index === S.selected);
+  if (!b) { setHtml("blockDetail", `<p class="empty">${T.noBlockSelected}</p>`); return; }
+  const sig = JSON.stringify([b, S.config.debug]);
+  if (S.detailSig === sig) return;
+  S.detailSig = sig;
+  const f = T.f;
+  let pretty = b.data;
+  try { pretty = JSON.stringify(JSON.parse(b.data), null, 2); } catch (e) { /* not JSON, show as is */ }
+  let html = `<dl class="fields">` +
+    `<dt>${f.index}</dt><dd>#${b.index}</dd>` +
+    `<dt>${f.time}</dt><dd>${fmtDate(b.timestamp)}</dd>` +
+    `<dt>${f.nonce}</dt><dd>${b.nonce}</dd>` +
+    `<dt>${f.hash}</dt><dd>${hashHtml(b.hash)}</dd>` +
+    `<dt>${f.prev}</dt><dd>${b.index > 0 ? `${hashHtml(b.previousHash)} <a href="#" data-block="${b.index - 1}">${T.goPrev} #${b.index - 1}</a>` : `<span class="empty">${T.none}</span>`}</dd>` +
+    `<dt>${f.recomputed}</dt><dd>${hashHtml(b.recomputedHash)} <span class="badge ${b.hashMatches ? "ok" : "err"}">${b.hashMatches ? T.match : T.mismatch}</span></dd>` +
+    `<dt>${f.tx}</dt><dd>${esc(b.index === 0 ? T.genesisSummary : b.summary)}</dd>` +
+    `<dt>${f.data}</dt><dd><details><summary>${T.rawJson}</summary><pre class="mono">${esc(pretty)}</pre></details></dd></dl>`;
+  if (S.config.debug) {
+    html += `<h3>${T.tamperTitle}</h3><p class="hint">${T.tamperHint}</p>` +
+      `<textarea id="tamperData" aria-label="${T.tamperTitle}">${esc(b.data)}</textarea>` +
+      `<p><button class="btn danger small" type="button" data-act="tamper" data-block="${b.index}">${T.tamperBtn}</button> ` +
+      `<button class="btn secondary small" type="button" data-act="restore" data-block="${b.index}">${T.restoreBtn}</button></p>`;
+  }
+  $("blockDetail").innerHTML = html;
+  $("blockDetail").dataset.sig = "";
+}
+
+function renderStatePanel() {
+  const c = T.cols;
+  const held = S.accounts.reduce((n, a) => n + a.balance, S.escrow);
+  const html = `<h3 style="margin-top:0">${T.stateBalances}</h3><div class="table-wrap"><table><thead><tr><th>${c.name}</th><th>${c.role}</th><th class="num">${c.balance}</th></tr></thead><tbody>` +
+    S.accounts.map((a) => `<tr><td>${esc(a.name)}</td><td>${T.roles[a.role]}</td><td class="num">${a.balance}</td></tr>`).join("") +
+    `<tr><td>escrow</td><td>${T.escrow}</td><td class="num">${S.escrow}</td></tr></tbody></table></div>` +
+    `<p class="hint">${T.minted}: ${S.minted} · ${T.held}: ${held}</p>` +
+    `<h3>${T.cars}</h3>${carsTable(S.cars)}<h3>${T.rentals}</h3>${rentalsTable(S.rentals)}`;
+  setHtml("statePanel", html);
+}
+
+function renderAll() {
+  renderHeader();
+  renderTabs();
+  renderFleet();
+  renderOwner();
+  renderRenter();
+  renderAdmin();
+  renderExplorer();
+}
+
+// ---- events ----
+function intOf(el) { const n = Number(el.value); return el.value !== "" && Number.isInteger(n) && n >= 0 ? n : null; }
+
+$("role").addEventListener("change", (e) => {
+  S.role = e.target.value;
+  store("role", S.role);
+  $("rentDeposit").dataset.touched = "";
+  renderAll();
+});
+
+$("tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-tab]");
+  if (b) { S.tab = b.dataset.tab; renderAll(); }
+});
+
+$("formRegister").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const rate = intOf($("regRate")), min = intOf($("regMin"));
+  if (rate === null || min === null) return toast(T.invalidNumber, "err");
+  if (await sendTx("RegisterCar", { dailyRate: rate, minDeposit: min })) e.target.reset();
+});
+
+$("formRent").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const carId = intOf($("rentCar")), days = intOf($("rentDays")), deposit = intOf($("rentDeposit"));
+  if (carId === null || days === null || deposit === null) return toast(T.invalidNumber, "err");
+  if (await sendTx("StartRental", { carId, days, deposit })) $("rentDeposit").dataset.touched = "";
+});
+$("rentCar").addEventListener("change", () => { $("rentDeposit").dataset.touched = ""; updateEstimate(); });
+$("rentDays").addEventListener("input", updateEstimate);
+$("rentDeposit").addEventListener("input", () => { $("rentDeposit").dataset.touched = "1"; });
+
+$("formMint").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const amount = intOf($("mintAmount"));
+  if (amount === null) return toast(T.invalidNumber, "err");
+  if (await sendTx("MintDeposit", { to: $("mintTo").value, amount })) $("mintAmount").value = "";
+});
+
+$("btnValidate").addEventListener("click", async () => { await refresh(); toast(T.validated, "ok"); });
+
+document.addEventListener("click", async (e) => {
+  const act = e.target.closest("[data-act]");
+  if (act) {
+    const kind = act.dataset.act;
+    if (kind === "return") return sendTx("ReturnCar", { rentalId: Number(act.dataset.id) });
+    if (kind === "settle") {
+      const input = document.querySelector(`[data-damage="${act.dataset.id}"]`);
+      const damage = intOf(input);
+      if (damage === null) return toast(T.invalidNumber, "err");
+      return sendTx("SettleRental", { rentalId: Number(act.dataset.id), damageCharge: damage });
+    }
+    if (kind === "tamper") {
+      try {
+        await api("/debug/tamper/" + act.dataset.block, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data: $("tamperData").value }) });
+        toast(T.tamperedDone, "ok");
+      } catch (err) { toast((err.body && err.body.mensagem) || T.networkError, "err"); }
+      return refresh();
+    }
+    if (kind === "restore") {
+      try { await api("/debug/restore/" + act.dataset.block, { method: "POST" }); toast(T.restored, "ok"); }
+      catch (err) { toast((err.body && err.body.mensagem) || T.networkError, "err"); }
+      return refresh();
+    }
+  }
+  const blk = e.target.closest("[data-block]");
+  if (blk && !blk.dataset.act) {
+    e.preventDefault();
+    S.selected = Number(blk.dataset.block);
+    renderExplorer();
+  }
+});
+
+// ---- start ----
+(function init() {
+  const saved = recall("role");
+  if (saved && ROLES[saved]) S.role = saved;
+  $("role").value = S.role;
+  refresh();
+  setInterval(refresh, 3000);
+})();
+</script>
+</body>
+</html>
