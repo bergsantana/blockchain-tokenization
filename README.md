@@ -9,13 +9,10 @@ Realizado como avaliação no curso de Sistemas de Informação na Universidade 
 
 ## 1. Introdução
 
-Este projeto é uma blockchain funcional, escrita do zero em **Go 1.23 usando apenas a biblioteca
-padrão** (zero dependências externas), com um **ledger de aluguel de carros** rodando em cima dela e
-uma **interface web em português** onde a mesma pessoa pode se colocar no papel de administrador,
+Blockchain funcional escrita do zero em **Go 1.23**, usando apenas a biblioteca padrão (zero
+dependências externas), com um **ledger de aluguel de carros** rodando em cima dela e uma
+**interface web em português** onde a mesma pessoa pode se colocar no papel de administrador,
 proprietário ou locatário e ainda inspecionar a cadeia bloco por bloco.
-
-
-Como executar:
 
 ```bash
 cd car-rent-blockchain
@@ -42,89 +39,51 @@ car-rent-blockchain/
 
 ## 2. O problema
 
-Alugar um carro envolve **dinheiro parado em mãos de terceiros**. O locatário entrega uma caução —
-hoje, um bloqueio no cartão de crédito — e essa caução fica sob controle exclusivo da locadora até
-que alguém, dentro da locadora, decida devolvê-la.
+Alugar um carro envolve **dinheiro parado em mãos de terceiros**: o locatário entrega uma caução
+que fica sob controle exclusivo da locadora até que alguém, dentro dela, decida devolvê-la. Isso
+gera dores concretas:
 
-Os pontos de dor são concretos:
+- **Opacidade da custódia** — o locatário não pode verificar que a caução existe, quanto é, ou se
+  já foi liberada; a única fonte de verdade é o banco de dados interno da locadora.
+- **Assimetria na liquidação** — quem decide o valor do dano é a mesma parte que recebe o dinheiro,
+  sem trilha auditável do cálculo.
+- **Disputas sem prova** — logs de sistema pertencem a uma das partes e podem ser editados.
+- **Conciliação manual** — locadora, proprietário da frota e locatário mantêm planilhas diferentes
+  do mesmo aluguel.
+- **Dinheiro bloqueado sem regra explícita** — o prazo de liberação da caução é só uma promessa
+  operacional, não verificável.
 
-1. **Opacidade da custódia.** O locatário não tem como verificar que sua caução existe, quanto é, ou
-   se já foi liberada. A única fonte de verdade é o banco de dados interno da locadora.
-2. **Assimetria na liquidação.** Quem decide o valor do dano é a mesma parte que recebe o dinheiro.
-   O locatário descobre o desconto depois do fato, sem trilha auditável do cálculo.
-3. **Disputas sem prova.** "Eu devolvi o carro no dia 10" contra "foi no dia 12" é uma disputa
-   sem registro independente. Logs de sistema pertencem a uma das partes e podem ser editados.
-4. **Conciliação manual entre partes.** Locadora, proprietário da frota (em modelos peer-to-peer
-   como Turo) e locatário mantêm planilhas diferentes do mesmo aluguel; fechar o mês é reconciliar
-   três versões da verdade.
-5. **Dinheiro bloqueado sem regra explícita.** O prazo de liberação da caução não é verificável; é
-   uma promessa operacional.
-
-O denominador comum: **o estado do negócio vive em um banco de dados que uma das partes pode
-alterar sem deixar rastro, e as regras de liquidação vivem no código interno dessa mesma parte.**
-
-Reescrevendo isso como requisitos técnicos, precisamos de:
-
-- **Histórico imutável e verificável** — qualquer parte consegue provar que o registro não mudou.
-- **Regras executadas de forma determinística** — a liquidação é aritmética pública, não decisão.
-- **Custódia que não pertence a nenhuma das partes** — a caução sai da conta do locatário e **não**
-  entra na conta do proprietário; fica num terceiro lugar que ninguém controla diretamente.
-- **Autorização explícita por papel** — quem pode emitir tokens, registrar carro, alugar, devolver e
-  liquidar é definido no protocolo, não no formulário da tela.
+O denominador comum: **o estado do negócio vive em um banco que uma das partes pode alterar sem
+deixar rastro, e as regras de liquidação vivem no código interno dessa mesma parte.** Isso exige
+**histórico imutável e verificável**, **regras executadas de forma determinística**, **custódia que
+não pertence a nenhuma das partes** e **autorização explícita por papel**.
 
 ---
 
 ## 3. Blockchain: o fundamental
 
-Uma blockchain é uma lista encadeada onde **cada elo é um hash criptográfico do elo anterior**. Isso
-é suficiente para que alterar qualquer registro antigo quebre, de forma detectável, todos os
+Uma blockchain é uma lista encadeada onde **cada elo é um hash criptográfico do elo anterior**.
+Isso basta para que alterar qualquer registro antigo quebre, de forma detectável, todos os
 registros posteriores.
-
-### 3.1 O bloco
 
 ```go
 // blockchain/block.go
 type Block struct {
 	Index        int
-	Timestamp    int64  // milissegundos Unix
+	Timestamp    int64
 	Hash         string
 	PreviousHash string
 	Data         string // a carga: no nosso caso, uma transação JSON
 	Nonce        int
-}
-```
-
-### 3.2 O hash
-
-O hash é SHA-256 da concatenação dos campos do bloco. É aqui que nasce a imutabilidade: mudar um
-único byte de `Data` muda o hash inteiro.
-
-```go
-// blockchain/block.go
-func (b *Block) hashInput() string {
-	prev := b.PreviousHash
-	if prev == "" {
-		prev = "null" // o genesis não tem anterior
-	}
-	return strconv.FormatInt(int64(b.Index)+b.Timestamp, 10) + prev + b.Data + strconv.Itoa(b.Nonce)
 }
 
 func CalculateHash(b *Block) string {
 	sum := sha256.Sum256([]byte(b.hashInput()))
 	return hex.EncodeToString(sum[:])
 }
-```
 
-
-
-### 3.3 Prova de trabalho (mineração)
-
-O hash por si só impede alteração silenciosa, mas não **custa nada** produzir. A prova de trabalho
-exige que o hash comece com um número de zeros — e como SHA-256 é imprevisível, o único caminho é
-tentar valores de `Nonce` até acertar.
-
-```go
-// blockchain/block.go
+// ProofOfWork exige que o hash comece com N zeros: como SHA-256 é
+// imprevisível, o único caminho é tentar valores de Nonce até acertar.
 func (b *Block) ProofOfWork(difficulty int) {
 	b.Nonce = 0
 	target := Zeros(difficulty) // "000" para dificuldade 3
@@ -135,291 +94,50 @@ func (b *Block) ProofOfWork(difficulty int) {
 }
 ```
 
-Cada zero adicional multiplica por ~16 o trabalho esperado. É isso que torna **reescrever a história
-caro**: quem adultera o bloco 3 precisa reminerar os blocos 3, 4, 5... até o fim da cadeia.
+Cada zero adicional multiplica por ~16 o trabalho esperado, o que torna reescrever a história caro:
+quem adultera um bloco precisa reminerar esse bloco e todos os seguintes.
 
-### 3.4 O encadeamento
-
-```go
-// blockchain/blockchain.go
-type Blockchain struct {
-	Difficulty int
-	Blocks     []*Block
-}
-
-func NewBlockchain(difficulty int) *Blockchain {
-	genesis := NewBlock(0, time.Now().UnixMilli(), "", "Bloco gênesis")
-	genesis.ProofOfWork(difficulty)
-	return &Blockchain{Difficulty: difficulty, Blocks: []*Block{genesis}}
-}
-
-// NewBlock liga o bloco novo ao último: previousHash = hash do último.
-func (bc *Blockchain) NewBlock(data string) *Block {
-	latest := bc.LatestBlock()
-	return NewBlock(latest.Index+1, time.Now().UnixMilli(), latest.Hash, data)
-}
-
-// AddBlock minera e então acrescenta.
-func (bc *Blockchain) AddBlock(b *Block) {
-	b.ProofOfWork(bc.Difficulty)
-	bc.Blocks = append(bc.Blocks, b)
-}
-```
-
-### 3.5 Validação
-
-Validar é refazer as três perguntas em cada bloco: o índice segue o anterior? o `PreviousHash`
-aponta de fato para o hash do anterior? o hash armazenado é igual ao hash recalculado?
+Validar a cadeia é refazer três perguntas em cada bloco: o índice segue o anterior? o
+`PreviousHash` aponta para o hash do bloco anterior? o hash armazenado é igual ao recalculado?
 
 ```go
 // blockchain/blockchain.go
 func isValidNewBlock(newBlock, previousBlock *Block) bool {
 	return previousBlock.Index+1 == newBlock.Index &&
-		newBlock.PreviousHash != "" &&
 		newBlock.PreviousHash == previousBlock.Hash &&
-		newBlock.Hash != "" &&
 		CalculateHash(newBlock) == newBlock.Hash // <- pega qualquer alteração em Data
-}
-
-func (bc *Blockchain) IsValid() bool {
-	if !bc.isFirstBlockValid() {
-		return false
-	}
-	for i := 1; i < len(bc.Blocks); i++ {
-		if !isValidNewBlock(bc.Blocks[i], bc.Blocks[i-1]) {
-			return false
-		}
-	}
-	return true
 }
 ```
 
-**É só isso.** Blocos, hash encadeado, prova de trabalho e validação — quatro ideias, cerca de 120
-linhas de Go. Todo o resto do sistema é domínio de negócio construído sobre essa base.
+**É só isso.** Blocos, hash encadeado, prova de trabalho e validação — quatro ideias. Todo o resto
+do sistema é domínio de negócio construído sobre essa base.
 
 ---
 
 ## 4. Como resolvemos o problema com blockchain
 
-A cadeia da seção 3 guarda strings. O pacote [rental/](car-rent-blockchain/rental/) transforma essas
-strings em um **ledger de locação**, e cada dor da seção 2 vira uma propriedade do protocolo.
+O pacote [rental/](car-rent-blockchain/rental/) transforma a cadeia genérica da seção 3 em um
+**ledger de locação**, e cada dor da seção 2 vira uma propriedade do protocolo:
 
-### 4.1 Cada bloco carrega uma transação
+- **Cada bloco carrega uma transação** — `Block.Data` é um JSON `{from, to, method, args, nonce}`,
+  endereçado a um contrato (ex.: `{"from":"bob","to":"rental","method":"StartRental",...}`).
+- **O estado é derivado, nunca armazenado** — não existe banco de dados do estado; saldos, carros e
+  locações são o resultado de `Replay`, que reaplica todas as transações em ordem. Não há `UPDATE`:
+  mudar um saldo exige um bloco, e mudar um bloco antigo exige reminerar a cadeia inteira.
+- **Contratos decidem as regras** — dois contratos, `token` (saldos e emissão) e `rental` (carros e
+  locações), cada um dono de uma fatia do estado. `rental` nunca move saldo diretamente: chama
+  métodos internos do `token` (ex.: `transfer`) que não são expostos a transações externas — a
+  mesma ideia de um escrow chamando um ERC-20, só que via chamada de método Go.
+- **Autorização por papel, no protocolo** — cada contrato declara o papel exigido por método
+  (`RoleAdmin`, `RoleOwner`, `RoleRenter`); o despacho verifica conta, nonce sequencial, método e
+  papel **antes** de qualquer efeito, o que também resolve replay e duplicação por retry de rede.
+- **Atomicidade** — toda transação roda sobre uma cópia do estado; se qualquer regra falhar, a
+  cópia é descartada e nenhum bloco é minerado.
+- **Validação completa** — `ValidateChain` verifica a integridade criptográfica (hash, prova de
+  trabalho, encadeamento) e reexecuta todas as regras de negócio, apontando **qual** bloco falhou e
+  **por quê**, em português.
 
-`Block.Data` passa a conter uma transação em JSON:
-
-```go
-// rental/tx.go
-type Tx struct {
-	From   string          `json:"from"`
-	To     string          `json:"to"`     // o contrato chamado
-	Method string          `json:"method"` // um método desse contrato
-	Args   json.RawMessage `json:"args"`
-	Nonce  uint64          `json:"nonce"`
-}
-```
-
-Na prática, um bloco carrega algo assim:
-
-```json
-{"from":"bob","to":"rental","method":"StartRental","args":{"carId":1,"days":3,"deposit":500},"nonce":1}
-```
-
-### 4.2 O estado é derivado, nunca armazenado
-
-Esta é a decisão de arquitetura central: **não existe banco de dados do estado.** Saldos, carros e
-locações são o *resultado* de aplicar todas as transações em ordem.
-
-```go
-// rental/validate.go
-func Replay(bc *blockchain.Blockchain) (*State, error) {
-	s := NewState()
-	for _, b := range bc.Blocks[1:] { // bloco 0 é o genesis, texto puro
-		tx, err := ParseTx(b.Data)
-		if err != nil {
-			return nil, &ReplayError{b.Index, err}
-		}
-		if _, err := s.Apply(tx); err != nil {
-			return nil, &ReplayError{b.Index, err}
-		}
-	}
-	return s, nil
-}
-```
-
-Consequência direta: **não há saldo que não tenha vindo de uma transação registrada em bloco.** Não
-existe `UPDATE balances SET ...`. Para mudar um saldo é preciso um bloco; para mudar um bloco antigo
-é preciso reminerar a cadeia inteira — e a validação denuncia antes disso.
-
-### 4.3 Contratos: o código que a cadeia executa
-
-As regras não são um bloco único de `if`s. Cada transação é **endereçada a um contrato**, e o
-contrato decide o que o método faz com o estado. Um contrato aqui é só um tipo Go que implementa:
-
-```go
-// rental/contract.go
-type Contract interface {
-	Methods() map[string]Role                // métodos, e o papel que pode chamar cada um
-	Call(s *State, tx *Tx) (*Receipt, error) // executa um método
-}
-```
-
-Os contratos são compilados junto com o nó, então **"fazer deploy" aqui é registrar o contrato no
-endereço em que ele atende**:
-
-```go
-// rental/contract.go
-var contracts = map[string]Contract{
-	"token":  token,            // saldos e emissão
-	"rental": rentalContract{}, // carros e locações
-}
-```
-
-São dois, e a divisão é proposital — cada um é dono de uma fatia do estado:
-
-| Contrato | Estado que possui | Métodos |
-| --- | --- | --- |
-| `token` | `Balances`, `Minted` | `MintDeposit` |
-| `rental` | `Cars`, `Rentals` | `RegisterCar`, `StartRental`, `ReturnCar`, `SettleRental` |
-
-O contrato `rental` **não mexe em saldo nenhum por conta própria**. Quando a caução precisa sair do
-locatário e entrar no escrow, ele chama o contrato `token`:
-
-```go
-// rental/rules.go — dentro de StartRental
-if err := token.transfer(s, tx.From, Escrow, a.Deposit); err != nil {
-	return nil, err
-}
-```
-
-E `transfer` não aparece em `Methods()`, então **nenhuma transação consegue chamá-la de fora**: ela
-existe apenas para o outro contrato. É a mesma ideia de um contrato de escrow chamando um ERC-20 —
-só que, neste projeto, a chamada entre contratos é uma chamada de método Go, não uma chamada de VM.
-
-### 4.4 Autorização por papel, no protocolo
-
-Cada contrato declara o papel exigido por método:
-
-```go
-// rental/token.go
-func (tokenContract) Methods() map[string]Role {
-	return map[string]Role{"MintDeposit": RoleAdmin} // só o administrador emite tokens
-}
-
-// rental/rules.go
-func (rentalContract) Methods() map[string]Role {
-	return map[string]Role{
-		"RegisterCar":  RoleOwner,  // só o proprietário cadastra carro
-		"StartRental":  RoleRenter, // só o locatário aluga
-		"ReturnCar":    RoleRenter, // só o locatário devolve
-		"SettleRental": RoleAdmin,  // só o administrador liquida
-	}
-}
-```
-
-O despacho é comum a todos os contratos: endereço, conta, nonce, método e papel são verificados
-uma única vez, **antes** de qualquer contrato rodar e, portanto, antes de qualquer efeito:
-
-```go
-// rental/contract.go
-func (s *State) apply(tx *Tx) (*Receipt, error) {
-	c, ok := contracts[tx.To]
-	if !ok {
-		return nil, ErrUnknownContract
-	}
-	role, ok := s.Roles[tx.From]
-	if !ok {
-		return nil, ErrUnknownAccount
-	}
-	if tx.Nonce != s.Nonces[tx.From]+1 { // sequencial: sem replay, sem duplicata
-		return nil, ErrBadNonce
-	}
-	required, ok := c.Methods()[tx.Method]
-	if !ok {
-		return nil, ErrUnknownMethod
-	}
-	if role != required {
-		return nil, ErrMissingRole
-	}
-	receipt, err := c.Call(s, tx) // só agora o contrato executa
-	if err != nil {
-		return nil, err
-	}
-	s.Nonces[tx.From]++
-	return receipt, nil
-}
-```
-
-O nonce sequencial por conta resolve de graça dois problemas clássicos: **replay** (reenviar a mesma
-transação assinada) e **duplicação por retry** de rede.
-
-### 4.5 Atomicidade: tudo ou nada
-
-Uma transação roda sobre uma **cópia** do estado. Se qualquer regra falhar, a cópia é descartada e o
-estado original fica intacto — não existe transação parcialmente aplicada.
-
-```go
-// rental/contract.go
-func (s *State) Apply(tx *Tx) (*Receipt, error) {
-	next := s.Clone()
-	receipt, err := next.apply(tx)
-	if err != nil {
-		return nil, err // s não foi tocado
-	}
-	*s = *next
-	return receipt, nil
-}
-```
-
-E o servidor só escreve o bloco **depois** que a transação foi aceita, de forma que a cadeia nunca
-contém transação inválida:
-
-```go
-// api/server.go
-receipt, err := s.state.Apply(&tx)
-if err != nil {
-	writeError(w, http.StatusUnprocessableEntity, code, rental.Message(err))
-	return
-}
-data, _ := tx.Encode()
-block := s.bc.NewBlock(data)
-s.bc.AddBlock(block) // minera e acrescenta
-```
-
-### 4.6 Validação completa = criptografia + regras
-
-`ValidateChain` é a resposta para "posso confiar neste histórico?". Ela verifica as três checagens
-criptográficas, mais a prova de trabalho, mais a reexecução de todas as regras de negócio — e aponta
-**qual** bloco falhou e **por quê**, em português:
-
-```go
-// rental/validate.go
-func ValidateChain(bc *blockchain.Blockchain) Validation {
-	target := blockchain.Zeros(bc.Difficulty)
-	for i, b := range bc.Blocks {
-		switch {
-		case b.Index != i:
-			return invalid(i, "O índice do bloco está incorreto.")
-		case i == 0 && b.PreviousHash != "":
-			return invalid(i, "O bloco gênesis não pode ter hash anterior.")
-		case i > 0 && b.PreviousHash != bc.Blocks[i-1].Hash:
-			return invalid(i, "O hash anterior não confere com o hash do bloco anterior.")
-		case b.Hash == "" || blockchain.CalculateHash(b) != b.Hash:
-			return invalid(i, "O hash armazenado difere do hash recalculado: os dados do bloco foram alterados.")
-		case !strings.HasPrefix(b.Hash, target):
-			return invalid(i, "O hash não atende à dificuldade (prova de trabalho ausente).")
-		}
-	}
-	if _, err := Replay(bc); err != nil { // as regras também fazem parte da validade
-		// ...
-	}
-	return Validation{Valid: true}
-}
-```
-
-### 4.7 De volta às dores da seção 2
-
-| Dor | Como a blockchain resolve |
+| Dor (seção 2) | Como a blockchain resolve |
 | --- | --- |
 | Custódia opaca | A caução vai para a conta `escrow`, visível em `GET /api/accounts`, e sai dela apenas por `SettleRental` |
 | Liquidação assimétrica | O cálculo é aritmética determinística em `settleRental`, auditável por qualquer parte |
@@ -434,292 +152,84 @@ func ValidateChain(bc *blockchain.Blockchain) Validation {
 **Tokenizar é representar um direito econômico como saldo transferível em um ledger, sujeito a
 regras executáveis.** Aqui o ativo tokenizado é o **depósito de caução**.
 
-### 5.1 O token de depósito
+- **Token de depósito** — saldos em `uint64` (nunca float, para não acumular erro), emissão
+  controlada só por `MintDeposit`/`ADMIN`, e aritmética verificada contra overflow em todo crédito e
+  multiplicação.
+- **Invariante contábil** — `TotalHeld() == Minted`: nenhuma operação cria ou destrói valor, apenas
+  movimenta. Alugar, devolver e liquidar são transferências; só `MintDeposit` altera o total.
+  Testado em [rental/rental_test.go](car-rent-blockchain/rental/rental_test.go).
+- **Escrow sem papel** — a pseudoconta `escrow` não tem `Role`, então não pode assinar transações
+  nem receber emissão direta. Ela só se move como efeito colateral das regras de locação: em vez de
+  "confie que não mexemos na caução", é **estruturalmente impossível mexer**.
+- **Carro tokenizado** — um registro com dono, diária, depósito mínimo e status
+  (`AVAILABLE`/`RENTED`); o status no ledger é o que impede locação dupla.
 
-```go
-// rental/state.go
-type State struct {
-	Roles        map[string]Role
-	Balances     map[string]uint64 // saldos do token de depósito, inclusive o escrow
-	Nonces       map[string]uint64
-	Cars         map[uint64]*Car
-	Rentals      map[uint64]*Rental
-	NextCarID    uint64
-	NextRentalID uint64
-	Minted       uint64 // total já emitido
-}
-```
-
-Propriedades de projeto:
-
-- **Inteiro sem sinal (`uint64`), nunca ponto flutuante.** Dinheiro em `float` acumula erro; o token
-  é uma unidade indivisível, como centavos.
-- **Emissão controlada.** Só `MintDeposit`, só pelo `ADMIN`, e cada emissão soma em `Minted`.
-- **Aritmética verificada contra overflow**, em todo crédito e toda multiplicação:
-
-```go
-// rental/contract.go
-func mulChecked(a, b uint64) (uint64, error) {
-	if a != 0 && (a*b)/a != b {
-		return 0, ErrOverflow
-	}
-	return a * b, nil
-}
-```
-
-### 5.2 O invariante contábil
-
-```go
-// rental/state.go
-// TotalHeld é a soma de todos os saldos, escrow incluído. Sempre igual a Minted.
-func (s *State) TotalHeld() uint64 {
-	var total uint64
-	for _, v := range s.Balances {
-		total += v
-	}
-	return total
-}
-```
-
-`TotalHeld() == Minted` é o invariante que define a sanidade do token: **nenhuma operação cria nem
-destrói valor** — apenas movimenta. Alugar, devolver e liquidar são transferências; só `MintDeposit`
-altera o total, e de forma explícita e registrada. Os testes em
-[rental/rental_test.go](car-rent-blockchain/rental/rental_test.go) checam esse invariante.
-
-### 5.3 O escrow: custódia que não pertence a ninguém
-
-```go
-// rental/state.go
-// Escrow é a pseudoconta que guarda os depósitos bloqueados. Não tem papel,
-// então não pode nem enviar transações nem receber tokens emitidos.
-const Escrow = "escrow"
-```
-
-O detalhe elegante: **o escrow não tem papel**. Como toda transação exige `s.Roles[tx.From]`, o
-escrow é incapaz de assinar qualquer coisa — e como `MintDeposit` também exige que o destinatário
-tenha papel, ninguém pode emitir tokens direto nele. O escrow só se move como **efeito colateral das
-regras de locação**. Em vez de "confie que não mexemos na caução", temos "é estruturalmente
-impossível mexer".
-
-### 5.4 Tokenização do ativo físico
-
-O carro também é tokenizado, como um registro com dono, preço e estado:
-
-```go
-// rental/state.go
-type Car struct {
-	ID         uint64    `json:"id"`
-	Owner      string    `json:"owner"`
-	DailyRate  uint64    `json:"dailyRate"`
-	MinDeposit uint64    `json:"minDeposit"`
-	Status     CarStatus `json:"status"` // AVAILABLE | RENTED
-}
-```
-
-`Status` no ledger é o que impede locação dupla: `StartRental` exige `CarAvailable`, e a própria
-transação marca o carro como `RENTED` no mesmo passo atômico.
-
-### 5.5 O ciclo de vida: onde o token se move
+Ciclo de vida do token:
 
 ```text
 MintDeposit     admin ──emite 1000──▶ bob
-StartRental     bob ──600 tokens──▶ escrow     [carro: RENTED, locação: ACTIVE]
+StartRental     bob ──600 tokens──▶ escrow     [carro: RENTED]
 ReturnCar       (nenhum token se move)         [locação: RETURNED]
 SettleRental    escrow ──cobrança──▶ alice
                 escrow ──reembolso──▶ bob      [carro: AVAILABLE, locação: CLOSED]
 ```
 
-O bloqueio em `StartRental`:
-
-```go
-// rental/rules.go
-rent, err := mulChecked(a.Days, car.DailyRate)  // preço travado no momento da locação
-if a.Deposit < car.MinDeposit || a.Deposit < rent {
-	return nil, ErrDepositTooLow  // a caução tem que cobrir o aluguel
-}
-if err := token.transfer(s, tx.From, Escrow, a.Deposit); err != nil {
-	return nil, err // saldo insuficiente: o token contract é quem sabe disso
-}
-car.Status = CarRented
-```
-
-E a liquidação — o coração econômico do sistema, oito linhas de aritmética pública:
-
-```go
-// rental/rules.go
-charge, err := addChecked(r.Rent, a.DamageCharge)
-var unpaid uint64
-if charge > r.Deposit {
-	unpaid = charge - r.Deposit  // o que a caução não cobriu fica registrado
-	charge = r.Deposit           // nunca se cobra além do depositado
-}
-refund := r.Deposit - charge
-token.transfer(s, Escrow, r.Owner, charge)   // proprietário recebe aluguel + danos
-token.transfer(s, Escrow, r.Renter, refund)  // locatário recebe o que sobrou
-r.Status = RentalClosed                      // charge + refund == Deposit: o escrow esvazia
-s.Cars[r.CarID].Status = CarAvailable
-```
-
-Três garantias estruturais aqui:
-
-1. **O escrow nunca retém resíduo** — `charge + refund == r.Deposit`, sempre.
-2. **A cobrança é limitada pela caução** — o excesso não é cobrado à força; é registrado como
-   `Unpaid`, uma dívida transparente a ser tratada fora da cadeia.
-3. **O preço é imutável** — `r.Rent` foi calculado no `StartRental`; se o proprietário mudar a
-   diária depois, a locação em curso não é afetada.
+Na liquidação: a cobrança é limitada pela caução (o excesso fica registrado como `Unpaid`, dívida
+transparente fora da cadeia), o escrow nunca retém resíduo (`charge + refund == deposit`, sempre), e
+o preço é imutável — travado no `StartRental`, independente de mudanças futuras na diária.
 
 ---
 
 ## 6. Exemplos
 
-### 6.1 A demo do terminal (fase 1)
+### Demo do terminal (fase 1)
 
 ```bash
 cd car-rent-blockchain && go run ./cmd/console
 ```
 
-```text
-Bloco #0 [hashAnterior : , dataHora : 05/10/2025 20:41:03, dados : Bloco gênesis, hash : 0000a3f1...]
-Bloco #1 [hashAnterior : 0000a3f1..., dataHora : 05/10/2025 20:41:03, dados : Tout sur le Bitcoin, hash : 0000b7c2...]
-Bloco #2 [hashAnterior : 0000b7c2..., dataHora : 05/10/2025 20:41:04, dados : Sylvain Saurel, hash : 00001d8e...]
-...
-A blockchain é válida?
-Sim, é válida!
-```
+Porta a demo original em Java: minera uma cadeia com dificuldade 4 e confirma
+`"A blockchain é válida? Sim, é válida!"`.
 
-Note que todo hash começa com quatro zeros: dificuldade 4, a mesma do `Main.java` original.
-
-### 6.2 Um aluguel completo via HTTP
+### Aluguel completo via HTTP
 
 Servidor: `go run ./cmd/server --debug`. Contas de desenvolvimento: `admin` (ADMIN), `alice`
 (OWNER), `bob` (RENTER).
 
 ```bash
-# 1. O admin emite 1000 tokens de depósito para bob
-curl -s localhost:8080/api/tx -d '{
-  "from":"admin","to":"token","method":"MintDeposit","nonce":1,
-  "args":{"to":"bob","amount":1000}}'
-
-# 2. Alice registra um carro: diária 100, depósito mínimo 300
-curl -s localhost:8080/api/tx -d '{
-  "from":"alice","to":"rental","method":"RegisterCar","nonce":1,
-  "args":{"dailyRate":100,"minDeposit":300}}'
-# -> receipt: {"carId":1}
-
-# 3. Bob aluga o carro 1 por 5 dias, caução de 600 (aluguel = 500)
-curl -s localhost:8080/api/tx -d '{
-  "from":"bob","to":"rental","method":"StartRental","nonce":1,
-  "args":{"carId":1,"days":5,"deposit":600}}'
-# -> receipt: {"carId":1,"rentalId":1}
-# estado: bob 400 · escrow 600 · alice 0
-
-# 4. Bob devolve o carro
-curl -s localhost:8080/api/tx -d '{
-  "from":"bob","to":"rental","method":"ReturnCar","nonce":2,
-  "args":{"rentalId":1}}'
-# locação: RETURNED (aguardando inspeção)
-
-# 5. O admin liquida, com 50 de dano constatado
-curl -s localhost:8080/api/tx -d '{
-  "from":"admin","to":"rental","method":"SettleRental","nonce":2,
-  "args":{"rentalId":1,"damageCharge":50}}'
-# -> receipt: {"carId":1,"rentalId":1,"paid":550,"refunded":50,"unpaid":0}
+curl -s localhost:8080/api/tx -d '{"from":"admin","to":"token","method":"MintDeposit","nonce":1,"args":{"to":"bob","amount":1000}}'
+curl -s localhost:8080/api/tx -d '{"from":"alice","to":"rental","method":"RegisterCar","nonce":1,"args":{"dailyRate":100,"minDeposit":300}}'
+curl -s localhost:8080/api/tx -d '{"from":"bob","to":"rental","method":"StartRental","nonce":1,"args":{"carId":1,"days":5,"deposit":600}}'
+curl -s localhost:8080/api/tx -d '{"from":"bob","to":"rental","method":"ReturnCar","nonce":2,"args":{"rentalId":1}}'
+curl -s localhost:8080/api/tx -d '{"from":"admin","to":"rental","method":"SettleRental","nonce":2,"args":{"rentalId":1,"damageCharge":50}}'
+# -> {"carId":1,"rentalId":1,"paid":550,"refunded":50,"unpaid":0}
 ```
 
-Conferindo a contabilidade — `paid 550 + refunded 50 == deposit 600`, escrow zerado, e
-`400 + 550 + 50 == 1000 == minted`:
+`GET /api/accounts` confirma a contabilidade: `550 + 50 == 600` (depósito) e
+`400 + 550 + 50 == 1000` (minted). Transações inválidas (caução baixa, papel errado, método no
+contrato errado, nonce repetido) são rejeitadas com `422` e não geram bloco.
+
+### Demonstração de adulteração
+
+Com `--debug`, o explorador permite editar o `Data` de um bloco já minerado — o que um banco de
+dados tradicional permitiria a um administrador com acesso de escrita:
 
 ```bash
-curl -s localhost:8080/api/accounts
-```
-
-```json
-{
-  "accounts": [
-    {"name":"admin","role":"ADMIN","balance":0,"nextNonce":3},
-    {"name":"alice","role":"OWNER","balance":550,"nextNonce":2},
-    {"name":"bob","role":"RENTER","balance":450,"nextNonce":3}
-  ],
-  "escrow": 0,
-  "minted": 1000
-}
-```
-
-A cadeia agora tem seis blocos: o genesis mais uma transação por bloco.
-
-### 6.3 Regras rejeitando o que deve rejeitar
-
-```bash
-# Caução abaixo do aluguel (5 dias x 100 = 500)
-curl -s localhost:8080/api/tx -d '{"from":"bob","to":"rental","method":"StartRental","nonce":3,
-  "args":{"carId":1,"days":5,"deposit":400}}'
-# 422 {"codigo":"ErrDepositTooLow","mensagem":"O depósito é menor que o mínimo do carro ou que o valor do aluguel."}
-
-# Papel errado: proprietário tentando emitir tokens
-curl -s localhost:8080/api/tx -d '{"from":"alice","to":"token","method":"MintDeposit","nonce":2,
-  "args":{"to":"alice","amount":999999}}'
-# 422 {"codigo":"ErrMissingRole", ...}
-
-# Método no contrato errado: MintDeposit pertence ao contrato token
-curl -s localhost:8080/api/tx -d '{"from":"admin","to":"rental","method":"MintDeposit","nonce":3,
-  "args":{"to":"bob","amount":1}}'
-# 422 {"codigo":"ErrUnknownMethod", ...}
-
-# Nonce repetido (ataque de replay)
-curl -s localhost:8080/api/tx -d '{"from":"bob","to":"rental","method":"ReturnCar","nonce":2,
-  "args":{"rentalId":1}}'
-# 422 {"codigo":"ErrBadNonce", ...}
-```
-
-Toda rejeição deixa a cadeia **inalterada**: nenhum bloco é minerado para transação inválida.
-
-### 6.4 A demonstração de adulteração
-
-Este é o exemplo que fecha o argumento inteiro. Com `--debug`, a aba *Explorador da Blockchain*
-permite editar o `Data` de um bloco já minerado — exatamente o que um banco de dados tradicional
-permitiria a um administrador com acesso de escrita.
-
-```bash
-# Trocar os dados do bloco 3 (o StartRental de bob), sem reminerar
-curl -s -X POST localhost:8080/api/debug/tamper/3 \
-  -d '{"data":"{\"from\":\"bob\",\"to\":\"rental\",\"method\":\"StartRental\",\"nonce\":1,\"args\":{\"carId\":1,\"days\":1,\"deposit\":600}}"}'
-
+curl -s -X POST localhost:8080/api/debug/tamper/3 -d '{"data":"..."}'
 curl -s localhost:8080/api/validate
+# -> {"valida": false, "blocoInvalido": 3, "motivo": "...dados do bloco foram alterados."}
 ```
 
-```json
-{
-  "valida": false,
-  "blocoInvalido": 3,
-  "motivo": "O hash armazenado difere do hash recalculado: os dados do bloco foram alterados."
-}
-```
+A cadeia aponta o bloco exato e o motivo, e enquanto inválida o servidor recusa qualquer transação
+nova. `POST /api/debug/restore/3` desfaz a adulteração.
 
-A cadeia **aponta o bloco exato** e diz o motivo. E enquanto estiver inválida, o servidor recusa
-qualquer transação nova:
-
-```go
-// api/server.go
-if v := rental.ValidateChain(s.bc); !v.Valid {
-	writeError(w, http.StatusConflict, "ErrChainInvalid",
-		"A cadeia está inválida. Restaure o bloco adulterado antes de enviar transações.")
-	return
-}
-```
-
-Restaurando (`POST /api/debug/restore/3`), a cadeia volta a `{"valida": true}`. No explorador, cada
-bloco mostra lado a lado o hash armazenado e o hash recalculado, com um resumo em português da
-transação (`Summarize`), por exemplo: *"bob iniciou a locação do carro 1 por 5 dias (depósito
-600)."*
-
-### 6.5 A interface web
+### Interface web
 
 ```bash
 go run ./cmd/server --debug   # http://localhost:8080
 ```
 
-Tudo em pt-BR. Um seletor no topo troca o papel ativo, e cada papel vê apenas as abas que lhe
-competem:
+Tudo em pt-BR; um seletor no topo troca o papel ativo:
 
 | Papel | Conta | Abas |
 | --- | --- | --- |
@@ -727,26 +237,17 @@ competem:
 | Proprietário | `alice` | Frota · Meus carros · Explorador da Blockchain |
 | Locatário | `bob` | Frota · Alugar · Explorador da Blockchain |
 
-A aba *Administração* mostra a fila "Aguardando inspeção" — as locações em `RETURNED` esperando
-liquidação. A aba *Explorador* mostra a lista de blocos (mais recente primeiro), o detalhe do bloco
-selecionado e o **estado derivado da cadeia**, deixando visível que saldos e locações não são dados
-armazenados, mas consequência do histórico.
+O Explorador mostra a lista de blocos e o estado derivado da cadeia, deixando visível que saldos e
+locações são consequência do histórico, não dados armazenados.
 
-### 6.6 Testes
+### Testes
 
 ```bash
 cd car-rent-blockchain && go test ./...
 ```
 
-```text
-ok  	car-rent-blockchain/api
-ok  	car-rent-blockchain/blockchain
-ok  	car-rent-blockchain/rental
-```
-
-As três suítes cobrem, respectivamente: hash idêntico ao do Java e detecção de cadeia corrompida;
-cada regra de negócio, o roteamento entre contratos, o invariante `TotalHeld() == Minted` e os
-limites de overflow; e o comportamento HTTP da API, incluindo os códigos de erro.
+Três suítes (`api`, `blockchain`, `rental`) cobrem hash e detecção de cadeia corrompida, cada regra
+de negócio e o invariante `TotalHeld() == Minted`, e o comportamento HTTP da API.
 
 ---
 
