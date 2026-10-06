@@ -2,7 +2,8 @@
 
 **Tokenização de depósitos e caução em uma blockchain escrita em Go**
 
-Universidade do Estado do Amazonas · 8º período · Blockchain e Tokenização
+Proposta de sistema empregando blockchain para aluguel de carros, utilizando tokenização não fungível de bens para custodia e pagamentos. 
+Realizado como avaliação no curso de Sistemas de Informação na Universidade do Estado do Amazonas.
 
 ---
 
