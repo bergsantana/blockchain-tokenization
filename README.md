@@ -114,11 +114,7 @@ func CalculateHash(b *Block) string {
 }
 ```
 
-> **Nota de fidelidade ao port.** Em Java, `index + timestamp + previousHash + ...` é avaliado da
-> esquerda para a direita, então `index` e `timestamp` são **somados como números** antes de a
-> primeira string entrar na expressão, e um `previousHash` nulo é impresso como `"null"`. As duas
-> peculiaridades foram preservadas de propósito: o port em Go produz **exatamente o mesmo SHA-256**
-> que o original em Java para a mesma entrada.
+
 
 ### 3.3 Prova de trabalho (mineração)
 
