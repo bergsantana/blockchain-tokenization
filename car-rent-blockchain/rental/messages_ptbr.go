@@ -8,6 +8,7 @@ import (
 // Every user-facing sentence produced by this package is pt-BR and lives in this file.
 
 var messagesPtBR = map[string]string{
+	"ErrUnknownContract":     "Contrato desconhecido.",
 	"ErrUnknownAccount":      "Conta desconhecida.",
 	"ErrBadNonce":            "Número de sequência (nonce) incorreto. Atualize a página e tente de novo.",
 	"ErrUnknownMethod":       "Operação desconhecida.",

@@ -116,11 +116,13 @@ car-rent-blockchain/
 ├── cmd/
 │   ├── console/main.go        # phase 1: Main.java
 │   └── server/main.go         # phase 3: starts the HTTP server and the web UI
-├── rental/                    # phase 2: transactions, roles, rules, state
+├── rental/                    # phase 2: contracts, transactions, roles, state
+│   ├── contract.go            #   Contract interface, registry, Apply and the dispatcher
 │   ├── tx.go                  #   transaction envelope and strict JSON decoding
 │   ├── state.go               #   accounts, balances, cars, rentals
 │   ├── errors.go              #   rule violations, with stable English codes
-│   ├── rules.go               #   the five methods and Apply
+│   ├── token.go               #   the token contract: MintDeposit, credit, transfer
+│   ├── rules.go               #   the rental contract: the four rental methods
 │   ├── messages_ptbr.go       #   every pt-BR sentence of this package
 │   ├── validate.go            #   Replay and ValidateChain
 │   └── rental_test.go
@@ -493,7 +495,7 @@ Phase 2 adds the `rental` package. It only **uses** the `blockchain` package; it
 Transaction envelope:
 
 ```json
-{"from": "bob", "method": "StartRental", "args": {"carId": 1, "days": 3, "deposit": 500}, "nonce": 1}
+{"from": "bob", "to": "rental", "method": "StartRental", "args": {"carId": 1, "days": 3, "deposit": 500}, "nonce": 1}
 ```
 
 `nonce` must equal the sender's number of already accepted transactions plus one, which stops the
@@ -524,13 +526,17 @@ that holds locked deposits and cannot send transactions.
 
 ### 7.4 Transactions and rules
 
-| Method | Allowed role | Args | Rules and effect |
-| --- | --- | --- | --- |
-| `MintDeposit` | `ADMIN` | `to`, `amount` | `to` is a known account other than `escrow`; `amount > 0`; no overflow. Adds `amount` to `to`. |
-| `RegisterCar` | `OWNER` | `dailyRate`, `minDeposit` | `dailyRate > 0`. Creates a car owned by the sender, `AVAILABLE`. |
-| `StartRental` | `RENTER` | `carId`, `days`, `deposit` | Car exists and is `AVAILABLE`; `1 <= days <= 365`; `deposit >= minDeposit` and `deposit >= days * dailyRate`; renter balance `>= deposit`. Moves `deposit` to `escrow`, car becomes `RENTED`, rental is `ACTIVE`. |
-| `ReturnCar` | `RENTER` | `rentalId` | The sender is the rental's renter and it is `ACTIVE`. Rental becomes `RETURNED`. |
-| `SettleRental` | `ADMIN` | `rentalId`, `damageCharge` | Rental is `RETURNED`. `rent = days * dailyRate`. Charge `rent + damageCharge`, capped at `deposit`, goes from `escrow` to the owner; the rest goes back to the renter. Car becomes `AVAILABLE`, rental `CLOSED`. Any part of the damage that the deposit could not cover is recorded as `unpaid` in the transaction receipt. |
+A transaction names a contract in `to` and one of that contract's methods in `method`. Two
+contracts are registered: `token` owns the balances, `rental` owns the cars and the rentals, and
+`rental` moves tokens only by calling the token contract's internal `transfer`.
+
+| Contract | Method | Allowed role | Args | Rules and effect |
+| --- | --- | --- | --- | --- |
+| `token` | `MintDeposit` | `ADMIN` | `to`, `amount` | `to` is a known account other than `escrow`; `amount > 0`; no overflow. Adds `amount` to `to`. |
+| `rental` | `RegisterCar` | `OWNER` | `dailyRate`, `minDeposit` | `dailyRate > 0`. Creates a car owned by the sender, `AVAILABLE`. |
+| `rental` | `StartRental` | `RENTER` | `carId`, `days`, `deposit` | Car exists and is `AVAILABLE`; `1 <= days <= 365`; `deposit >= minDeposit` and `deposit >= days * dailyRate`; renter balance `>= deposit`. Moves `deposit` to `escrow`, car becomes `RENTED`, rental is `ACTIVE`. |
+| `rental` | `ReturnCar` | `RENTER` | `rentalId` | The sender is the rental's renter and it is `ACTIVE`. Rental becomes `RETURNED`. |
+| `rental` | `SettleRental` | `ADMIN` | `rentalId`, `damageCharge` | Rental is `RETURNED`. `rent = days * dailyRate`. Charge `rent + damageCharge`, capped at `deposit`, goes from `escrow` to the owner; the rest goes back to the renter. Car becomes `AVAILABLE`, rental `CLOSED`. Any part of the damage that the deposit could not cover is recorded as `unpaid` in the transaction receipt. |
 
 Every method also checks that `from` exists, that `nonce` is correct and that the arguments are
 well formed (unknown fields and negative or non-integer numbers are rejected rather than read as
@@ -676,7 +682,8 @@ The phase is done when this runs by hand in the browser:
 
 9. Write `rental/tx.go` (envelope, JSON decoding with unknown fields rejected) and
    `rental/state.go` (accounts, balances, cars, rentals, `Clone`).
-10. Write `rental/rules.go`: one function per method in section 7.4, plus `Replay` and
+10. Write `rental/contract.go` (the Contract interface, the registry and the dispatcher),
+    `rental/token.go` and `rental/rules.go`: one function per method in section 7.4, plus `Replay` and
     `ValidateChain`. Each transaction runs on a copy of the state that is kept only if the rules
     pass.
 11. Write `rental/rental_test.go` as listed in section 7.5. Do not start phase 3 until it passes.

@@ -6,9 +6,11 @@ import (
 	"io"
 )
 
-// Tx is the transaction envelope stored as JSON in Block.Data.
+// Tx is the transaction envelope stored as JSON in Block.Data. To is the address of the
+// contract being called; Method is one of that contract's methods.
 type Tx struct {
 	From   string          `json:"from"`
+	To     string          `json:"to"`
 	Method string          `json:"method"`
 	Args   json.RawMessage `json:"args"`
 	Nonce  uint64          `json:"nonce"`

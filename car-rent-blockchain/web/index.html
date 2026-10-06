@@ -255,10 +255,10 @@ function toast(text, kind) {
   toastTimer = setTimeout(() => { el.hidden = true; }, 5000);
 }
 
-async function sendTx(method, args) {
+async function sendTx(to, method, args) {
   const from = ROLES[S.role].account;
   const acct = S.accounts.find((a) => a.name === from);
-  const tx = { from, method, args, nonce: acct ? acct.nextNonce : 1 };
+  const tx = { from, to, method, args, nonce: acct ? acct.nextNonce : 1 };
   try {
     const res = await api("/tx", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(tx) });
     toast(T.ok[method](res), "ok");
@@ -479,14 +479,14 @@ $("formRegister").addEventListener("submit", async (e) => {
   e.preventDefault();
   const rate = intOf($("regRate")), min = intOf($("regMin"));
   if (rate === null || min === null) return toast(T.invalidNumber, "err");
-  if (await sendTx("RegisterCar", { dailyRate: rate, minDeposit: min })) e.target.reset();
+  if (await sendTx("rental", "RegisterCar", { dailyRate: rate, minDeposit: min })) e.target.reset();
 });
 
 $("formRent").addEventListener("submit", async (e) => {
   e.preventDefault();
   const carId = intOf($("rentCar")), days = intOf($("rentDays")), deposit = intOf($("rentDeposit"));
   if (carId === null || days === null || deposit === null) return toast(T.invalidNumber, "err");
-  if (await sendTx("StartRental", { carId, days, deposit })) $("rentDeposit").dataset.touched = "";
+  if (await sendTx("rental", "StartRental", { carId, days, deposit })) $("rentDeposit").dataset.touched = "";
 });
 $("rentCar").addEventListener("change", () => { $("rentDeposit").dataset.touched = ""; updateEstimate(); });
 $("rentDays").addEventListener("input", updateEstimate);
@@ -496,7 +496,7 @@ $("formMint").addEventListener("submit", async (e) => {
   e.preventDefault();
   const amount = intOf($("mintAmount"));
   if (amount === null) return toast(T.invalidNumber, "err");
-  if (await sendTx("MintDeposit", { to: $("mintTo").value, amount })) $("mintAmount").value = "";
+  if (await sendTx("token", "MintDeposit", { to: $("mintTo").value, amount })) $("mintAmount").value = "";
 });
 
 $("btnValidate").addEventListener("click", async () => { await refresh(); toast(T.validated, "ok"); });
@@ -505,12 +505,12 @@ document.addEventListener("click", async (e) => {
   const act = e.target.closest("[data-act]");
   if (act) {
     const kind = act.dataset.act;
-    if (kind === "return") return sendTx("ReturnCar", { rentalId: Number(act.dataset.id) });
+    if (kind === "return") return sendTx("rental", "ReturnCar", { rentalId: Number(act.dataset.id) });
     if (kind === "settle") {
       const input = document.querySelector(`[data-damage="${act.dataset.id}"]`);
       const damage = intOf(input);
       if (damage === null) return toast(T.invalidNumber, "err");
-      return sendTx("SettleRental", { rentalId: Number(act.dataset.id), damageCharge: damage });
+      return sendTx("rental", "SettleRental", { rentalId: Number(act.dataset.id), damageCharge: damage });
     }
     if (kind === "tamper") {
       try {

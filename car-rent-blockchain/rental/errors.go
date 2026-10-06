@@ -9,6 +9,7 @@ type Error struct{ Code string }
 func (e *Error) Error() string { return e.Code }
 
 var (
+	ErrUnknownContract     = &Error{"ErrUnknownContract"}
 	ErrUnknownAccount      = &Error{"ErrUnknownAccount"}
 	ErrBadNonce            = &Error{"ErrBadNonce"}
 	ErrUnknownMethod       = &Error{"ErrUnknownMethod"}

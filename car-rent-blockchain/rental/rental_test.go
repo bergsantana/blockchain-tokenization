@@ -18,12 +18,23 @@ func newLedger() *ledger {
 	return &ledger{bc: blockchain.NewBlockchain(2), st: NewState()}
 }
 
+// contractOf addresses a transaction the way the UI does: it asks which contract
+// declares the method. Only TestContractRouting sets "to" by hand.
+func contractOf(method string) string {
+	for addr, c := range contracts {
+		if _, ok := c.Methods()[method]; ok {
+			return addr
+		}
+	}
+	return "rental" // an unknown method: let the rental contract reject it
+}
+
 func makeTx(from, method string, nonce uint64, args any) *Tx {
 	raw, err := json.Marshal(args)
 	if err != nil {
 		panic(err)
 	}
-	return &Tx{From: from, Method: method, Args: raw, Nonce: nonce}
+	return &Tx{From: from, To: contractOf(method), Method: method, Args: raw, Nonce: nonce}
 }
 
 // send applies a transaction with the correct nonce and, if accepted, mines it.
@@ -199,6 +210,31 @@ func TestBadNonce(t *testing.T) {
 	}
 }
 
+// A transaction reaches exactly one contract: the one named in "to".
+func TestContractRouting(t *testing.T) {
+	mint := m{"to": "bob", "amount": 10}
+	for _, c := range []struct{ to, method, code string }{
+		{"token", "MintDeposit", ""},                    // the right address
+		{"rental", "MintDeposit", "ErrUnknownMethod"},   // right method, wrong contract
+		{"", "MintDeposit", "ErrUnknownContract"},       // no address at all
+		{"escrow", "MintDeposit", "ErrUnknownContract"}, // an account is not a contract
+	} {
+		st := NewState()
+		_, err := st.Apply(&Tx{From: "admin", To: c.to, Method: c.method, Args: mustJSON(mint), Nonce: 1})
+		if CodeOf(err) != c.code {
+			t.Errorf("to=%q %s: error = %v, want %q", c.to, c.method, err, c.code)
+		}
+	}
+}
+
+func mustJSON(v any) json.RawMessage {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
+
 func TestReplayMatchesLiveState(t *testing.T) {
 	l := happyPath(t)
 	l.mustSend(t, "admin", "SettleRental", m{"rentalId": 1, "damageCharge": 150})
@@ -227,7 +263,7 @@ func TestValidateChain(t *testing.T) {
 
 func TestEditedDataIsDetectedAtThatBlock(t *testing.T) {
 	l := happyPath(t)
-	l.bc.Blocks[2].Data = `{"from":"alice","method":"RegisterCar","args":{"dailyRate":1,"minDeposit":0},"nonce":1}`
+	l.bc.Blocks[2].Data = `{"from":"alice","to":"rental","method":"RegisterCar","args":{"dailyRate":1,"minDeposit":0},"nonce":1}`
 	v := ValidateChain(l.bc)
 	if v.Valid || v.InvalidBlock == nil || *v.InvalidBlock != 2 {
 		t.Fatalf("validation = %+v, want invalid at block 2", v)
@@ -251,7 +287,7 @@ func TestBrokenLinkIsDetected(t *testing.T) {
 func TestReminedWithInvalidTransactionIsDetectedByReplay(t *testing.T) {
 	l := happyPath(t)
 	// block 2 now registers a car with another owner's nonce: alice nonce 5 is out of order
-	l.bc.Blocks[2].Data = `{"from":"alice","method":"RegisterCar","args":{"dailyRate":100,"minDeposit":300},"nonce":5}`
+	l.bc.Blocks[2].Data = `{"from":"alice","to":"rental","method":"RegisterCar","args":{"dailyRate":100,"minDeposit":300},"nonce":5}`
 	for i := 2; i < len(l.bc.Blocks); i++ {
 		b := l.bc.Blocks[i]
 		b.PreviousHash = l.bc.Blocks[i-1].Hash

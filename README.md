@@ -32,7 +32,7 @@ mais importante do projeto, explicado na seção 6.
 ```text
 car-rent-blockchain/
   blockchain/      bloco, hash SHA-256, prova de trabalho, validação da cadeia
-  rental/          transações, estado do mundo, regras de negócio, replay, mensagens pt-BR
+  rental/          contratos, transações, estado do mundo, replay, mensagens pt-BR
   api/             servidor HTTP: a cadeia e o ledger expostos como JSON
   web/             app de navegador
   cmd/server/      binário do servidor
@@ -212,10 +212,17 @@ strings em um **ledger de locação**, e cada dor da seção 2 vira uma propried
 // rental/tx.go
 type Tx struct {
 	From   string          `json:"from"`
-	Method string          `json:"method"`
+	To     string          `json:"to"`     // o contrato chamado
+	Method string          `json:"method"` // um método desse contrato
 	Args   json.RawMessage `json:"args"`
 	Nonce  uint64          `json:"nonce"`
 }
+```
+
+Na prática, um bloco carrega algo assim:
+
+```json
+{"from":"bob","to":"rental","method":"StartRental","args":{"carId":1,"days":3,"deposit":500},"nonce":1}
 ```
 
 ### 4.2 O estado é derivado, nunca armazenado
@@ -244,23 +251,82 @@ Consequência direta: **não há saldo que não tenha vindo de uma transação r
 existe `UPDATE balances SET ...`. Para mudar um saldo é preciso um bloco; para mudar um bloco antigo
 é preciso reminerar a cadeia inteira — e a validação denuncia antes disso.
 
-### 4.3 Autorização por papel, no protocolo
+### 4.3 Contratos: o código que a cadeia executa
+
+As regras não são um bloco único de `if`s. Cada transação é **endereçada a um contrato**, e o
+contrato decide o que o método faz com o estado. Um contrato aqui é só um tipo Go que implementa:
 
 ```go
-// rental/rules.go
-var methodRoles = map[string]Role{
-	"MintDeposit":  RoleAdmin,  // só o administrador emite tokens
-	"RegisterCar":  RoleOwner,  // só o proprietário cadastra carro
-	"StartRental":  RoleRenter, // só o locatário aluga
-	"ReturnCar":    RoleRenter, // só o locatário devolve
-	"SettleRental": RoleAdmin,  // só o administrador liquida
+// rental/contract.go
+type Contract interface {
+	Methods() map[string]Role                // métodos, e o papel que pode chamar cada um
+	Call(s *State, tx *Tx) (*Receipt, error) // executa um método
 }
 ```
 
-A checagem acontece antes de qualquer efeito, junto com a verificação de conta e de nonce:
+Os contratos são compilados junto com o nó, então **"fazer deploy" aqui é registrar o contrato no
+endereço em que ele atende**:
 
 ```go
+// rental/contract.go
+var contracts = map[string]Contract{
+	"token":  token,            // saldos e emissão
+	"rental": rentalContract{}, // carros e locações
+}
+```
+
+São dois, e a divisão é proposital — cada um é dono de uma fatia do estado:
+
+| Contrato | Estado que possui | Métodos |
+| --- | --- | --- |
+| `token` | `Balances`, `Minted` | `MintDeposit` |
+| `rental` | `Cars`, `Rentals` | `RegisterCar`, `StartRental`, `ReturnCar`, `SettleRental` |
+
+O contrato `rental` **não mexe em saldo nenhum por conta própria**. Quando a caução precisa sair do
+locatário e entrar no escrow, ele chama o contrato `token`:
+
+```go
+// rental/rules.go — dentro de StartRental
+if err := token.transfer(s, tx.From, Escrow, a.Deposit); err != nil {
+	return nil, err
+}
+```
+
+E `transfer` não aparece em `Methods()`, então **nenhuma transação consegue chamá-la de fora**: ela
+existe apenas para o outro contrato. É a mesma ideia de um contrato de escrow chamando um ERC-20 —
+só que, neste projeto, a chamada entre contratos é uma chamada de método Go, não uma chamada de VM.
+
+### 4.4 Autorização por papel, no protocolo
+
+Cada contrato declara o papel exigido por método:
+
+```go
+// rental/token.go
+func (tokenContract) Methods() map[string]Role {
+	return map[string]Role{"MintDeposit": RoleAdmin} // só o administrador emite tokens
+}
+
+// rental/rules.go
+func (rentalContract) Methods() map[string]Role {
+	return map[string]Role{
+		"RegisterCar":  RoleOwner,  // só o proprietário cadastra carro
+		"StartRental":  RoleRenter, // só o locatário aluga
+		"ReturnCar":    RoleRenter, // só o locatário devolve
+		"SettleRental": RoleAdmin,  // só o administrador liquida
+	}
+}
+```
+
+O despacho é comum a todos os contratos: endereço, conta, nonce, método e papel são verificados
+uma única vez, **antes** de qualquer contrato rodar e, portanto, antes de qualquer efeito:
+
+```go
+// rental/contract.go
 func (s *State) apply(tx *Tx) (*Receipt, error) {
+	c, ok := contracts[tx.To]
+	if !ok {
+		return nil, ErrUnknownContract
+	}
 	role, ok := s.Roles[tx.From]
 	if !ok {
 		return nil, ErrUnknownAccount
@@ -268,27 +334,32 @@ func (s *State) apply(tx *Tx) (*Receipt, error) {
 	if tx.Nonce != s.Nonces[tx.From]+1 { // sequencial: sem replay, sem duplicata
 		return nil, ErrBadNonce
 	}
-	required, ok := methodRoles[tx.Method]
+	required, ok := c.Methods()[tx.Method]
 	if !ok {
 		return nil, ErrUnknownMethod
 	}
 	if role != required {
 		return nil, ErrMissingRole
 	}
-	// ... despacho para a regra do método
+	receipt, err := c.Call(s, tx) // só agora o contrato executa
+	if err != nil {
+		return nil, err
+	}
+	s.Nonces[tx.From]++
+	return receipt, nil
 }
 ```
 
 O nonce sequencial por conta resolve de graça dois problemas clássicos: **replay** (reenviar a mesma
 transação assinada) e **duplicação por retry** de rede.
 
-### 4.4 Atomicidade: tudo ou nada
+### 4.5 Atomicidade: tudo ou nada
 
 Uma transação roda sobre uma **cópia** do estado. Se qualquer regra falhar, a cópia é descartada e o
 estado original fica intacto — não existe transação parcialmente aplicada.
 
 ```go
-// rental/rules.go
+// rental/contract.go
 func (s *State) Apply(tx *Tx) (*Receipt, error) {
 	next := s.Clone()
 	receipt, err := next.apply(tx)
@@ -315,7 +386,7 @@ block := s.bc.NewBlock(data)
 s.bc.AddBlock(block) // minera e acrescenta
 ```
 
-### 4.5 Validação completa = criptografia + regras
+### 4.6 Validação completa = criptografia + regras
 
 `ValidateChain` é a resposta para "posso confiar neste histórico?". Ela verifica as três checagens
 criptográficas, mais a prova de trabalho, mais a reexecução de todas as regras de negócio — e aponta
@@ -346,7 +417,7 @@ func ValidateChain(bc *blockchain.Blockchain) Validation {
 }
 ```
 
-### 4.6 De volta às dores da seção 2
+### 4.7 De volta às dores da seção 2
 
 | Dor | Como a blockchain resolve |
 | --- | --- |
@@ -354,7 +425,7 @@ func ValidateChain(bc *blockchain.Blockchain) Validation {
 | Liquidação assimétrica | O cálculo é aritmética determinística em `settleRental`, auditável por qualquer parte |
 | Disputa sem prova | Cada ação é um bloco minerado, com timestamp e hash encadeado |
 | Conciliação manual | Há um único ledger; todas as partes derivam o mesmo estado do mesmo histórico |
-| Regra implícita | `methodRoles` e as regras de cada método *são* o contrato, em código executável |
+| Regra implícita | Os contratos `token` e `rental` *são* o contrato jurídico, em código executável |
 
 ---
 
@@ -387,7 +458,7 @@ Propriedades de projeto:
 - **Aritmética verificada contra overflow**, em todo crédito e toda multiplicação:
 
 ```go
-// rental/rules.go
+// rental/contract.go
 func mulChecked(a, b uint64) (uint64, error) {
 	if a != 0 && (a*b)/a != b {
 		return 0, ErrOverflow
@@ -466,11 +537,9 @@ rent, err := mulChecked(a.Days, car.DailyRate)  // preço travado no momento da 
 if a.Deposit < car.MinDeposit || a.Deposit < rent {
 	return nil, ErrDepositTooLow  // a caução tem que cobrir o aluguel
 }
-if s.Balances[tx.From] < a.Deposit {
-	return nil, ErrInsufficientBalance
+if err := token.transfer(s, tx.From, Escrow, a.Deposit); err != nil {
+	return nil, err // saldo insuficiente: o token contract é quem sabe disso
 }
-s.credit(Escrow, a.Deposit)
-s.Balances[tx.From] -= a.Deposit
 car.Status = CarRented
 ```
 
@@ -485,10 +554,9 @@ if charge > r.Deposit {
 	charge = r.Deposit           // nunca se cobra além do depositado
 }
 refund := r.Deposit - charge
-s.credit(r.Owner, charge)        // proprietário recebe aluguel + danos
-s.credit(r.Renter, refund)       // locatário recebe o que sobrou
-s.Balances[Escrow] -= r.Deposit  // o escrow esvazia por completo
-r.Status = RentalClosed
+token.transfer(s, Escrow, r.Owner, charge)   // proprietário recebe aluguel + danos
+token.transfer(s, Escrow, r.Renter, refund)  // locatário recebe o que sobrou
+r.Status = RentalClosed                      // charge + refund == Deposit: o escrow esvazia
 s.Cars[r.CarID].Status = CarAvailable
 ```
 
@@ -529,31 +597,31 @@ Servidor: `go run ./cmd/server --debug`. Contas de desenvolvimento: `admin` (ADM
 ```bash
 # 1. O admin emite 1000 tokens de depósito para bob
 curl -s localhost:8080/api/tx -d '{
-  "from":"admin","method":"MintDeposit","nonce":1,
+  "from":"admin","to":"token","method":"MintDeposit","nonce":1,
   "args":{"to":"bob","amount":1000}}'
 
 # 2. Alice registra um carro: diária 100, depósito mínimo 300
 curl -s localhost:8080/api/tx -d '{
-  "from":"alice","method":"RegisterCar","nonce":1,
+  "from":"alice","to":"rental","method":"RegisterCar","nonce":1,
   "args":{"dailyRate":100,"minDeposit":300}}'
 # -> receipt: {"carId":1}
 
 # 3. Bob aluga o carro 1 por 5 dias, caução de 600 (aluguel = 500)
 curl -s localhost:8080/api/tx -d '{
-  "from":"bob","method":"StartRental","nonce":1,
+  "from":"bob","to":"rental","method":"StartRental","nonce":1,
   "args":{"carId":1,"days":5,"deposit":600}}'
 # -> receipt: {"carId":1,"rentalId":1}
 # estado: bob 400 · escrow 600 · alice 0
 
 # 4. Bob devolve o carro
 curl -s localhost:8080/api/tx -d '{
-  "from":"bob","method":"ReturnCar","nonce":2,
+  "from":"bob","to":"rental","method":"ReturnCar","nonce":2,
   "args":{"rentalId":1}}'
 # locação: RETURNED (aguardando inspeção)
 
 # 5. O admin liquida, com 50 de dano constatado
 curl -s localhost:8080/api/tx -d '{
-  "from":"admin","method":"SettleRental","nonce":2,
+  "from":"admin","to":"rental","method":"SettleRental","nonce":2,
   "args":{"rentalId":1,"damageCharge":50}}'
 # -> receipt: {"carId":1,"rentalId":1,"paid":550,"refunded":50,"unpaid":0}
 ```
@@ -583,17 +651,22 @@ A cadeia agora tem seis blocos: o genesis mais uma transação por bloco.
 
 ```bash
 # Caução abaixo do aluguel (5 dias x 100 = 500)
-curl -s localhost:8080/api/tx -d '{"from":"bob","method":"StartRental","nonce":3,
+curl -s localhost:8080/api/tx -d '{"from":"bob","to":"rental","method":"StartRental","nonce":3,
   "args":{"carId":1,"days":5,"deposit":400}}'
 # 422 {"codigo":"ErrDepositTooLow","mensagem":"O depósito é menor que o mínimo do carro ou que o valor do aluguel."}
 
 # Papel errado: proprietário tentando emitir tokens
-curl -s localhost:8080/api/tx -d '{"from":"alice","method":"MintDeposit","nonce":2,
+curl -s localhost:8080/api/tx -d '{"from":"alice","to":"token","method":"MintDeposit","nonce":2,
   "args":{"to":"alice","amount":999999}}'
 # 422 {"codigo":"ErrMissingRole", ...}
 
+# Método no contrato errado: MintDeposit pertence ao contrato token
+curl -s localhost:8080/api/tx -d '{"from":"admin","to":"rental","method":"MintDeposit","nonce":3,
+  "args":{"to":"bob","amount":1}}'
+# 422 {"codigo":"ErrUnknownMethod", ...}
+
 # Nonce repetido (ataque de replay)
-curl -s localhost:8080/api/tx -d '{"from":"bob","method":"ReturnCar","nonce":2,
+curl -s localhost:8080/api/tx -d '{"from":"bob","to":"rental","method":"ReturnCar","nonce":2,
   "args":{"rentalId":1}}'
 # 422 {"codigo":"ErrBadNonce", ...}
 ```
@@ -609,7 +682,7 @@ permitiria a um administrador com acesso de escrita.
 ```bash
 # Trocar os dados do bloco 3 (o StartRental de bob), sem reminerar
 curl -s -X POST localhost:8080/api/debug/tamper/3 \
-  -d '{"data":"{\"from\":\"bob\",\"method\":\"StartRental\",\"nonce\":1,\"args\":{\"carId\":1,\"days\":1,\"deposit\":600}}"}'
+  -d '{"data":"{\"from\":\"bob\",\"to\":\"rental\",\"method\":\"StartRental\",\"nonce\":1,\"args\":{\"carId\":1,\"days\":1,\"deposit\":600}}"}'
 
 curl -s localhost:8080/api/validate
 ```
@@ -672,8 +745,8 @@ ok  	car-rent-blockchain/rental
 ```
 
 As três suítes cobrem, respectivamente: hash idêntico ao do Java e detecção de cadeia corrompida;
-cada regra de negócio, o invariante `TotalHeld() == Minted` e os limites de overflow; e os contratos
-da API, incluindo os códigos de erro.
+cada regra de negócio, o roteamento entre contratos, o invariante `TotalHeld() == Minted` e os
+limites de overflow; e o comportamento HTTP da API, incluindo os códigos de erro.
 
 ---
 
@@ -811,7 +884,7 @@ só o hash, que não é dado pessoal, permanece.
 ### 7.6 O que não muda
 
 Vale notar o que sobrevive intacto do protótipo para a produção: **o pacote `rental` inteiro.**
-`State`, `Apply`, `methodRoles`, a aritmética verificada, o escrow sem papel, o invariante contábil —
+`State`, `Apply`, os dois contratos, a aritmética verificada, o escrow sem papel, o invariante contábil —
 nada disso depende de consenso, persistência ou escala. É a lógica de negócio determinística, e o
 trabalho das seções acima é só construir, ao redor dela, uma infraestrutura capaz de ordenar
 transações de forma confiável e servir leitura em volume.

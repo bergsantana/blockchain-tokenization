@@ -49,10 +49,18 @@ func (c *client) tx(from, method, args string) (int, errorBody) {
 			nonce = a.NextNonce
 		}
 	}
-	body := `{"from":"` + from + `","method":"` + method + `","args":` + args + `,"nonce":` + itoa(nonce) + `}`
+	body := `{"from":"` + from + `","to":"` + contractOf(method) + `","method":"` + method + `","args":` + args + `,"nonce":` + itoa(nonce) + `}`
 	var e errorBody
 	status := c.do("POST", "/api/tx", body, &e)
 	return status, e
+}
+
+// contractOf addresses a transaction the way the web UI does.
+func contractOf(method string) string {
+	if method == "MintDeposit" {
+		return "token"
+	}
+	return "rental"
 }
 
 func itoa(n uint64) string {
@@ -140,8 +148,8 @@ func TestMalformedBodiesAreRefused(t *testing.T) {
 	c := newClient(t, false)
 	for _, body := range []string{
 		`not json`,
-		`{"from":"admin","method":"MintDeposit","args":{},"nonce":1,"extra":true}`,
-		`{"from":"admin","method":"MintDeposit","args":{"to":"bob","amount":-1},"nonce":1}`,
+		`{"from":"admin","to":"token","method":"MintDeposit","args":{},"nonce":1,"extra":true}`,
+		`{"from":"admin","to":"token","method":"MintDeposit","args":{"to":"bob","amount":-1},"nonce":1}`,
 	} {
 		if status := c.do("POST", "/api/tx", body, nil); status != 400 && status != 422 {
 			t.Errorf("body %q: status %d", body, status)
@@ -158,7 +166,7 @@ func TestTamperAndRestore(t *testing.T) {
 	c.mustTx("alice", "RegisterCar", `{"dailyRate":100,"minDeposit":300}`)
 
 	var tampered BlockView
-	edit := `{"data":"{\"from\":\"admin\",\"method\":\"MintDeposit\",\"args\":{\"to\":\"bob\",\"amount\":9000},\"nonce\":1}"}`
+	edit := `{"data":"{\"from\":\"admin\",\"to\":\"token\",\"method\":\"MintDeposit\",\"args\":{\"to\":\"bob\",\"amount\":9000},\"nonce\":1}"}`
 	if status := c.do("POST", "/api/debug/tamper/1", edit, &tampered); status != 200 {
 		t.Fatalf("tamper status %d", status)
 	}
